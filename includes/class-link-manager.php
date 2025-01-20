@@ -22,6 +22,7 @@ class Link_Manager {
             add_action('add_meta_boxes', [$this, 'add_meta_box']);
             add_action('save_post', [$this, 'process_suggestions'], 20, 2);
             add_action('wp_ajax_wsl_apply_suggestion', [$this, 'ajax_apply_suggestion']);
+            add_action('wp_ajax_wsl_refresh_suggestions', [$this, 'ajax_refresh_suggestions']);
         }
     }
 
@@ -233,28 +234,11 @@ class Link_Manager {
     }
 
     /**
-     * Process suggestions when post is saved
+     * Process suggestions when post is saved or when manually triggered
      *
      * @param int $post_id Post ID
      * @param WP_Post $post Post object
      */
-    public function __construct() {
-        global $wsl_instances;
-        
-        // Set up dependencies if available
-        if (!empty($wsl_instances)) {
-            $this->content_processor = $wsl_instances['content_processor'] ?? null;
-            $this->openai_integration = $wsl_instances['openai'] ?? null;
-        }
-        
-        // Add hooks only if dependencies are available
-        if ($this->content_processor && $this->openai_integration) {
-            add_action('add_meta_boxes', [$this, 'add_meta_box']);
-            add_action('save_post', [$this, 'process_suggestions'], 20, 2);
-            add_action('wp_ajax_wsl_apply_suggestion', [$this, 'ajax_apply_suggestion']);
-            add_action('wp_ajax_wsl_refresh_suggestions', [$this, 'ajax_refresh_suggestions']);
-        }
-    }
 
     public function process_suggestions($post_id, $post) {
         // Skip if dependencies aren't available
