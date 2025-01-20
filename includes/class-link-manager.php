@@ -358,11 +358,14 @@ class Link_Manager {
             // Always create or update post if content is provided
             if (!empty($post_content)) {
                 error_log('WSL Debug - Using provided content for analysis');
+                error_log('WSL Debug - Content length: ' . strlen($post_content));
+                error_log('WSL Debug - Post ID: ' . ($post_id ? $post_id : 'none'));
 
                 // Create or update post
                 if (empty($post_id)) {
+                    error_log('WSL Debug - Creating new auto-draft');
                     $post_data = array(
-                        'post_title' => __('Auto Draft', 'wp-smart-linker'),
+                        'post_title' => __('Draft', 'wp-smart-linker'),
                         'post_content' => $post_content,
                         'post_status' => 'auto-draft',
                         'post_type' => 'post'
@@ -383,35 +386,52 @@ class Link_Manager {
 
                 error_log('WSL Debug - Post ID after save: ' . $post_id);
 
-                // Analyze content
-                $sections = $this->content_processor->analyze_content($post_content);
-                if (!empty($sections)) {
-                    error_log('WSL Debug - Content analysis found sections: ' . count($sections));
-                    
-                    // Store sections for later use
-                    update_post_meta($post_id, '_wsl_content_sections', $sections);
-                    
-                    // Get suggestions
-                    $suggestions = $this->openai_integration->analyze_content_for_links($sections, $post_id);
-                    error_log('WSL Debug - Generated suggestions: ' . count($suggestions));
-                    
-                    // Enhance suggestions with target titles
-                    foreach ($suggestions as &$suggestion) {
-                        $target_post = get_post($suggestion['target_post_id']);
-                        if ($target_post) {
-                            $suggestion['target_title'] = $target_post->post_title;
+                try {
+                    // Analyze content
+                    error_log('WSL Debug - Starting content analysis');
+                    $sections = $this->content_processor->analyze_content($post_content);
+                    if (!empty($sections)) {
+                        error_log('WSL Debug - Content analysis found ' . count($sections) . ' sections');
+                        error_log('WSL Debug - Sections: ' . print_r($sections, true));
+                        
+                        // Store sections for later use
+                        error_log('WSL Debug - Storing content sections');
+                        update_post_meta($post_id, '_wsl_content_sections', $sections);
+                        
+                        // Get suggestions
+                        error_log('WSL Debug - Requesting suggestions from OpenAI');
+                        $suggestions = $this->openai_integration->analyze_content_for_links($sections, $post_id);
+                        error_log('WSL Debug - Generated ' . count($suggestions) . ' suggestions');
+                        error_log('WSL Debug - Raw suggestions: ' . print_r($suggestions, true));
+                        
+                        // Enhance suggestions with target titles
+                        error_log('WSL Debug - Enhancing suggestions with target titles');
+                        foreach ($suggestions as &$suggestion) {
+                            $target_post = get_post($suggestion['target_post_id']);
+                            if ($target_post) {
+                                $suggestion['target_title'] = $target_post->post_title;
+                                error_log('WSL Debug - Added title for post ' . $target_post->ID . ': ' . $target_post->post_title);
+                            }
                         }
+
+                        // Store suggestions
+                        error_log('WSL Debug - Storing suggestions in post meta');
+                        update_post_meta($post_id, '_wsl_link_suggestions', $suggestions);
+
+                        error_log('WSL Debug - Sending success response');
+                        wp_send_json_success([
+                            'message' => __('Link suggestions generated successfully', 'wp-smart-linker'),
+                            'suggestions' => array_values($suggestions),
+                            'post_id' => $post_id
+                        ]);
+                        return;
+                    } else {
+                        error_log('WSL Debug - No sections found in content analysis');
                     }
-
-                    // Store suggestions
-                    update_post_meta($post_id, '_wsl_link_suggestions', $suggestions);
-
-                    wp_send_json_success([
-                        'message' => __('Link suggestions generated successfully', 'wp-smart-linker'),
-                        'suggestions' => array_values($suggestions),
-                        'post_id' => $post_id
-                    ]);
-                    return;
+                } catch (\Exception $e) {
+                    error_log('WSL Error in content analysis: ' . $e->getMessage());
+                    error_log('WSL Error trace: ' . $e->getTraceAsString());
+                    throw $e;
                 }
             }
 
