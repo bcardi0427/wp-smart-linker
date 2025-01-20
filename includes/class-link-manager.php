@@ -299,26 +299,49 @@ class Link_Manager {
     private function track_applied_suggestion($post_id, $suggestion) {
         error_log('WSL Debug - Tracking applied suggestion');
 
-        // Update applied links
-        $applied = get_post_meta($post_id, '_wsl_applied_links', true) ?: [];
-        $applied[] = [
-            'target_post_id' => $suggestion['target_post_id'],
-            'anchor_text' => $suggestion['anchor_text'],
+        // Verify post exists
+        $post = get_post($post_id);
+        if (!$post) {
+            throw new \Exception('Invalid post ID');
+        }
+
+        // Prepare new link data
+        $new_link = [
+            'target_post_id' => absint($suggestion['target_post_id']),
+            'anchor_text' => sanitize_text_field($suggestion['anchor_text']),
             'date_applied' => current_time('mysql')
         ];
+
+        // Get existing applied links with fallback
+        $applied = get_post_meta($post_id, '_wsl_applied_links', true);
+        $applied = is_array($applied) ? $applied : [];
         
-        if (!update_post_meta($post_id, '_wsl_applied_links', $applied)) {
+        // Add new link
+        $applied[] = $new_link;
+
+        // Delete and re-add to ensure clean data
+        delete_post_meta($post_id, '_wsl_applied_links');
+        $result = add_post_meta($post_id, '_wsl_applied_links', $applied);
+        
+        if (!$result) {
             throw new \Exception('Failed to save applied link');
         }
 
-        // Update remaining suggestions
-        $suggestions = get_post_meta($post_id, '_wsl_link_suggestions', true) ?: [];
+        // Get existing suggestions with fallback
+        $suggestions = get_post_meta($post_id, '_wsl_link_suggestions', true);
+        $suggestions = is_array($suggestions) ? $suggestions : [];
+        
+        // Filter out the applied suggestion
         $suggestions = array_filter($suggestions, function($s) use ($suggestion) {
             return $s['section_index'] !== $suggestion['section_index'] ||
                    $s['target_post_id'] !== $suggestion['target_post_id'];
         });
 
-        if (!update_post_meta($post_id, '_wsl_link_suggestions', $suggestions)) {
+        // Delete and re-add to ensure clean data
+        delete_post_meta($post_id, '_wsl_link_suggestions');
+        $result = add_post_meta($post_id, '_wsl_link_suggestions', array_values($suggestions));
+        
+        if (!$result) {
             throw new \Exception('Failed to update suggestions');
         }
 
