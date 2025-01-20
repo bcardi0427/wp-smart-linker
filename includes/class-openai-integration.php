@@ -13,6 +13,9 @@ class OpenAI_Integration {
     private $api_key;
     private $api_endpoint = 'https://api.openai.com/v1/chat/completions';
     private $model;
+    private $firebase;
+
+    private $cache_expiry = 86400; // 24 hours
 
     private $valid_models = null;
     private $models_endpoint = 'https://api.openai.com/v1/models';
@@ -106,6 +109,8 @@ class OpenAI_Integration {
      * Initialize OpenAI integration
      */
     public function __construct() {
+        global $wsl_instances;
+        
         $settings = get_option('wsl_settings');
         $this->api_key = $settings['openai_api_key'] ?? '';
         
@@ -119,6 +124,12 @@ class OpenAI_Integration {
         }
         
         $this->model = $selected_model;
+
+        // Get Firebase instance
+        $this->firebase = $wsl_instances['firebase'] ?? null;
+        if (!$this->firebase || !$this->firebase->is_configured()) {
+            error_log('WSL Debug - Firebase not configured, falling back to transients for cache');
+        }
     }
 
     /**
@@ -367,39 +378,78 @@ PROMPT;
 
     private function get_cached_response($prompt) {
         $cache_key = $this->get_cache_key($prompt);
-        $cached = get_transient($cache_key);
         
+        // Try Firebase first if available
+        if ($this->firebase && $this->firebase->is_configured()) {
+            $cached = $this->firebase->get_cached_suggestions($cache_key);
+            if ($cached !== null) {
+                error_log('WSL Debug - Using cached API response from Firebase');
+                return $cached;
+            }
+        }
+        
+        // Fall back to transients
+        $cached = get_transient($cache_key);
         if ($cached !== false) {
-            error_log('WSL Debug - Using cached API response');
+            error_log('WSL Debug - Using cached API response from transients');
             return $cached;
         }
         
         return false;
     }
 
-    private function cache_response($prompt, $response, $expiry = 3600) {
+    private function cache_response($prompt, $response) {
         $cache_key = $this->get_cache_key($prompt);
-        set_transient($cache_key, $response, $expiry);
-        error_log('WSL Debug - Cached API response');
+        
+        // Cache in Firebase if available
+        if ($this->firebase && $this->firebase->is_configured()) {
+            $this->firebase->store_cached_suggestions($cache_key, $response, $this->cache_expiry);
+            error_log('WSL Debug - Cached API response in Firebase');
+        } else {
+            // Fall back to transients
+            set_transient($cache_key, $response, $this->cache_expiry);
+            error_log('WSL Debug - Cached API response in transients');
+        }
     }
 
     private function check_rate_limit() {
         $rate_key = 'wsl_api_rate_limit';
+
+        // Try Firebase first if available
+        if ($this->firebase && $this->firebase->is_configured()) {
+            $count = $this->firebase->get_rate_limit_count();
+            if ($count === null) {
+                $this->firebase->set_rate_limit_count(1, HOUR_IN_SECONDS);
+                return true;
+            }
+
+            if ($count >= 10) { // Max 10 requests per hour
+                error_log('WSL Debug - Rate limit exceeded (Firebase)');
+                throw new OpenAI_Exception(
+                    'Rate limit exceeded. Maximum 10 requests per hour. Please try again later.',
+                    OpenAI_Exception::ERROR_RATE_LIMIT
+                );
+            }
+
+            $this->firebase->increment_rate_limit_count();
+            return true;
+        }
+
+        // Fall back to transients
         $count = get_transient($rate_key);
-        
         if ($count === false) {
             set_transient($rate_key, 1, HOUR_IN_SECONDS);
             return true;
         }
-        
+
         if ($count >= 10) { // Max 10 requests per hour
-            error_log('WSL Debug - Rate limit exceeded');
+            error_log('WSL Debug - Rate limit exceeded (Transient)');
             throw new OpenAI_Exception(
                 'Rate limit exceeded. Maximum 10 requests per hour. Please try again later.',
                 OpenAI_Exception::ERROR_RATE_LIMIT
             );
         }
-        
+
         set_transient($rate_key, $count + 1, HOUR_IN_SECONDS);
         return true;
     }
