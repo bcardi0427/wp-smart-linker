@@ -355,12 +355,45 @@ class Link_Manager {
             error_log('WSL Debug - Content length: ' . strlen($post_content));
 
             // Handle post content directly if provided
+            // Always create or update post if content is provided
             if (!empty($post_content)) {
                 error_log('WSL Debug - Using provided content for analysis');
+
+                // Create or update post
+                if (empty($post_id)) {
+                    $post_data = array(
+                        'post_title' => __('Auto Draft', 'wp-smart-linker'),
+                        'post_content' => $post_content,
+                        'post_status' => 'auto-draft',
+                        'post_type' => 'post'
+                    );
+                    error_log('WSL Debug - Creating new auto-draft');
+                    $post_id = wp_insert_post($post_data);
+                } else {
+                    error_log('WSL Debug - Updating existing post: ' . $post_id);
+                    wp_update_post(array(
+                        'ID' => $post_id,
+                        'post_content' => $post_content
+                    ));
+                }
+
+                if (is_wp_error($post_id)) {
+                    throw new \Exception($post_id->get_error_message());
+                }
+
+                error_log('WSL Debug - Post ID after save: ' . $post_id);
+
+                // Analyze content
                 $sections = $this->content_processor->analyze_content($post_content);
                 if (!empty($sections)) {
                     error_log('WSL Debug - Content analysis found sections: ' . count($sections));
+                    
+                    // Store sections for later use
+                    update_post_meta($post_id, '_wsl_content_sections', $sections);
+                    
+                    // Get suggestions
                     $suggestions = $this->openai_integration->analyze_content_for_links($sections, $post_id);
+                    error_log('WSL Debug - Generated suggestions: ' . count($suggestions));
                     
                     // Enhance suggestions with target titles
                     foreach ($suggestions as &$suggestion) {
@@ -370,9 +403,13 @@ class Link_Manager {
                         }
                     }
 
+                    // Store suggestions
+                    update_post_meta($post_id, '_wsl_link_suggestions', $suggestions);
+
                     wp_send_json_success([
                         'message' => __('Link suggestions generated successfully', 'wp-smart-linker'),
-                        'suggestions' => array_values($suggestions)
+                        'suggestions' => array_values($suggestions),
+                        'post_id' => $post_id
                     ]);
                     return;
                 }

@@ -8,93 +8,87 @@ jQuery(document).ready(function($) {
     });
 
     // Handle refresh suggestions
-    $('.wsl-refresh-suggestions').on('click', function(e) {
+    $('.wsl-refresh-suggestions').on('click', async function(e) {
         e.preventDefault();
         const $button = $(this);
-        
-        // Check for unsaved changes
-        if (wp.data && wp.data.select('core/editor') && wp.data.select('core/editor').isEditedPostDirty()) {
-            if (!confirm('You have unsaved changes. Save your post first?')) {
-                return;
-            }
-            wp.data.dispatch('core/editor').savePost();
-            return;
-        }
-        
-        // Show loading state
-        $button.prop('disabled', true).text('Refreshing...');
         const $suggestionsArea = $('.wsl-suggestions');
-        const $loadingMessage = $('<p>').text('Analyzing content...');
-        $suggestionsArea.find('table').hide();
-        $suggestionsArea.append($loadingMessage);
         
-        // Get current content
-        let postContent = '';
-        if (wp.data && wp.data.select('core/editor')) {
-            postContent = wp.data.select('core/editor').getEditedPostContent();
-        } else if (tinyMCE && tinyMCE.get('content')) {
-            postContent = tinyMCE.get('content').getContent();
-        } else {
-            postContent = $('#content').val();
-        }
-        
-        // Send refresh request
-        $.ajax({
-            url: ajaxurl,
-            type: 'POST',
-            data: {
-                action: 'wsl_refresh_suggestions',
-                post_id: $('#post_ID').val() || 0,
-                post_content: postContent,
-                nonce: wsl.nonce
-            },
-            beforeSend: function() {
-                console.log('Sending refresh request with:', {
-                    postId: $('#post_ID').val() || 0,
-                    contentLength: postContent.length,
-                    nonce: wsl.nonce
-                });
-            },
-            success: function(response) {
-                if (response.success) {
-                    const $tbody = $('.wsl-suggestions tbody');
-                    $tbody.empty();
-                    
-                    if (response.data.suggestions && response.data.suggestions.length > 0) {
-                        response.data.suggestions.forEach(function(suggestion) {
-                            const $row = createSuggestionRow(suggestion);
-                            $tbody.append($row);
-                        });
-                        $suggestionsArea.find('table').show();
-                        showNotice('Suggestions refreshed successfully', 'success');
-                        
-                        // Rebind apply suggestion handlers
-                        bindSuggestionHandlers();
-                    } else {
-                        $tbody.append($('<tr><td colspan="4">').text('No suggestions found for this content'));
-                        showNotice('No suggestions found', 'info');
-                    }
-                } else {
-                    showNotice(response.data.message || 'Error refreshing suggestions', 'error');
-                }
-            },
-            error: function(xhr, status, error) {
-                console.error('AJAX error:', {
-                    status: status,
-                    error: error,
-                    response: xhr.responseText
-                });
-                showNotice('Error refreshing suggestions: ' + error, 'error');
-            },
-            complete: function() {
-                $button.prop('disabled', false).text('Refresh Suggestions');
-                $loadingMessage.remove();
-                $suggestionsArea.find('table').show();
+        try {
+            // Get current content
+            let postContent = '';
+            if (wp.data && wp.data.select('core/editor')) {
+                postContent = wp.data.select('core/editor').getEditedPostContent();
+            } else if (tinyMCE && tinyMCE.get('content')) {
+                postContent = tinyMCE.get('content').getContent();
+            } else {
+                postContent = $('#content').val();
             }
-        });
+
+            // Show loading state
+            $button.prop('disabled', true).text('Analyzing content...');
+            $suggestionsArea.find('table').fadeOut(200, function() {
+                const $loadingMessage = $('<div class="wsl-loading">').text('Analyzing content and generating suggestions...');
+                $suggestionsArea.append($loadingMessage);
+            });
+
+            // Make AJAX request
+            const response = await $.ajax({
+                url: ajaxurl,
+                type: 'POST',
+                data: {
+                    action: 'wsl_refresh_suggestions',
+                    post_id: $('#post_ID').val() || 0,
+                    post_content: postContent,
+                    nonce: wsl.nonce
+                }
+            });
+
+            // Handle response
+            if (response.success) {
+                const $tbody = $('.wsl-suggestions tbody');
+                $tbody.empty();
+                
+                // Update post ID if new post was created
+                if (response.data.post_id) {
+                    $('#post_ID').val(response.data.post_id);
+                }
+                
+                if (response.data.suggestions && response.data.suggestions.length > 0) {
+                    // Add suggestions to table
+                    response.data.suggestions.forEach(function(suggestion) {
+                        const $row = createSuggestionRow(suggestion);
+                        $tbody.append($row);
+                    });
+
+                    // Show table and success message
+                    $('.wsl-loading').remove();
+                    $suggestionsArea.find('table').fadeIn();
+                    showNotice('Suggestions generated successfully', 'success');
+
+                    // Rebind handlers
+                    bindSuggestionHandlers();
+                } else {
+                    // Show no suggestions message
+                    $('.wsl-loading').remove();
+                    $tbody.append($('<tr><td colspan="4">').text('No suggestions found for this content'));
+                    $suggestionsArea.find('table').fadeIn();
+                    showNotice('Analysis complete - no suggestions found', 'info');
+                }
+            } else {
+                throw new Error(response.data.message || 'Error refreshing suggestions');
+            }
+        } catch (error) {
+            console.error('Refresh error:', error);
+            showNotice(error.message || 'Error refreshing suggestions', 'error');
+        } finally {
+            // Reset button state
+            $button.prop('disabled', false).text('Refresh Suggestions');
+            $('.wsl-loading').remove();
+            $suggestionsArea.find('table').fadeIn();
+        }
     });
 
-    // Function to bind suggestion handlers
+    // Handle suggestion application
     function bindSuggestionHandlers() {
         $('.wsl-apply-suggestion').off('click').on('click', function(e) {
             e.preventDefault();
@@ -107,52 +101,6 @@ jQuery(document).ready(function($) {
             $row.addClass('wsl-loading');
             $button.prop('disabled', true);
 
-            // Insert link function
-            function insertLink(response) {
-                var anchorText = response.data.anchor_text;
-                var targetUrl = response.data.target_url;
-                
-                // Block Editor (Gutenberg)
-                if (wp.data && wp.data.select('core/editor')) {
-                    var content = wp.data.select('core/editor').getEditedPostContent();
-                    var blocks = wp.blocks.parse(content);
-                    
-                    blocks = blocks.map(function(block) {
-                        if (block.name === 'core/paragraph' &&
-                            block.attributes &&
-                            block.attributes.content &&
-                            block.attributes.content.includes(anchorText)) {
-                            
-                            block.attributes.content = block.attributes.content.replace(
-                                anchorText,
-                                '<a href="' + targetUrl + '">' + anchorText + '</a>'
-                            );
-                        }
-                        return block;
-                    });
-                    
-                    wp.data.dispatch('core/editor').resetBlocks(blocks);
-                    return true;
-                }
-                
-                // Classic Editor
-                else if (typeof tinyMCE !== 'undefined' && tinyMCE.get('content')) {
-                    var editor = tinyMCE.get('content');
-                    var content = editor.getContent();
-                    
-                    if (content.includes(anchorText)) {
-                        content = content.replace(
-                            anchorText,
-                            '<a href="' + targetUrl + '">' + anchorText + '</a>'
-                        );
-                        editor.setContent(content);
-                        return true;
-                    }
-                }
-                
-                return false;
-            }
-
             // Send AJAX request
             $.ajax({
                 url: ajaxurl,
@@ -161,7 +109,7 @@ jQuery(document).ready(function($) {
                     action: 'wsl_apply_suggestion',
                     suggestion: suggestion,
                     post_id: $('#post_ID').val(),
-                    nonce: nonce
+                    nonce: wsl.apply_nonce
                 },
                 success: function(response) {
                     if (response.success) {
@@ -189,8 +137,9 @@ jQuery(document).ready(function($) {
                         $button.prop('disabled', false);
                     }
                 },
-                error: function() {
-                    showNotice('Error applying suggestion', 'error');
+                error: function(xhr, status, error) {
+                    console.error('AJAX error:', status, error);
+                    showNotice('Error applying suggestion: ' + error, 'error');
                     $row.removeClass('wsl-loading');
                     $button.prop('disabled', false);
                 }
@@ -198,7 +147,7 @@ jQuery(document).ready(function($) {
         });
     }
 
-    // Bind initial suggestion handlers
+    // Initial bind
     bindSuggestionHandlers();
 
     // Create suggestion row
@@ -242,6 +191,52 @@ jQuery(document).ready(function($) {
         return $row;
     }
 
+    // Insert link into content
+    function insertLink(response) {
+        var anchorText = response.data.anchor_text;
+        var targetUrl = response.data.target_url;
+        
+        // Block Editor (Gutenberg)
+        if (wp.data && wp.data.select('core/editor')) {
+            var content = wp.data.select('core/editor').getEditedPostContent();
+            var blocks = wp.blocks.parse(content);
+            
+            blocks = blocks.map(function(block) {
+                if (block.name === 'core/paragraph' &&
+                    block.attributes &&
+                    block.attributes.content &&
+                    block.attributes.content.includes(anchorText)) {
+                    
+                    block.attributes.content = block.attributes.content.replace(
+                        anchorText,
+                        '<a href="' + targetUrl + '">' + anchorText + '</a>'
+                    );
+                }
+                return block;
+            });
+            
+            wp.data.dispatch('core/editor').resetBlocks(blocks);
+            return true;
+        }
+        
+        // Classic Editor
+        else if (typeof tinyMCE !== 'undefined' && tinyMCE.get('content')) {
+            var editor = tinyMCE.get('content');
+            var content = editor.getContent();
+            
+            if (content.includes(anchorText)) {
+                content = content.replace(
+                    anchorText,
+                    '<a href="' + targetUrl + '">' + anchorText + '</a>'
+                );
+                editor.setContent(content);
+                return true;
+            }
+        }
+        
+        return false;
+    }
+
     // Update empty state message
     function updateEmptyState() {
         if ($('.wsl-suggestions tbody tr').length === 0) {
@@ -264,9 +259,6 @@ jQuery(document).ready(function($) {
 
     /**
      * Show notice message
-     * 
-     * @param {string} message Message to display
-     * @param {string} type Notice type (success/error/info)
      */
     function showNotice(message, type = 'success') {
         const $notice = $(
