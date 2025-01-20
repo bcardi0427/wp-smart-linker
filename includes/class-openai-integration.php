@@ -1,10 +1,106 @@
 <?php
 namespace WSL;
 
+class OpenAI_Exception extends \Exception {
+    const ERROR_NO_API_KEY = 1;
+    const ERROR_RATE_LIMIT = 2;
+    const ERROR_API_ERROR = 3;
+    const ERROR_INVALID_RESPONSE = 4;
+    const ERROR_NO_CONTENT = 5;
+}
+
 class OpenAI_Integration {
     private $api_key;
     private $api_endpoint = 'https://api.openai.com/v1/chat/completions';
-    private $model = 'gpt-3.5-turbo';
+    private $model;
+
+    private $valid_models = null;
+    private $models_endpoint = 'https://api.openai.com/v1/models';
+
+    /**
+     * Get available models from OpenAI API
+     *
+     * @return array List of valid model IDs
+     */
+    private function fetch_valid_models() {
+        if ($this->valid_models !== null) {
+            return $this->valid_models;
+        }
+
+        try {
+            $response = wp_remote_get($this->models_endpoint, [
+                'headers' => [
+                    'Authorization' => 'Bearer ' . $this->api_key,
+                    'Content-Type' => 'application/json',
+                ]
+            ]);
+
+            if (is_wp_error($response)) {
+                throw new OpenAI_Exception(
+                    'Failed to fetch models: ' . $response->get_error_message(),
+                    OpenAI_Exception::ERROR_API_ERROR
+                );
+            }
+
+            $response_code = wp_remote_retrieve_response_code($response);
+            $response_body = wp_remote_retrieve_body($response);
+
+            if ($response_code !== 200) {
+                throw new OpenAI_Exception(
+                    'Failed to fetch models: ' . $response_body,
+                    OpenAI_Exception::ERROR_API_ERROR
+                );
+            }
+
+            $data = json_decode($response_body, true);
+            if (!isset($data['data']) || !is_array($data['data'])) {
+                throw new OpenAI_Exception(
+                    'Invalid models response format',
+                    OpenAI_Exception::ERROR_INVALID_RESPONSE
+                );
+            }
+
+            // Filter to only include chat models (those with 'gpt' in the name)
+            $this->valid_models = [];
+            foreach ($data['data'] as $model) {
+                if (isset($model['id']) && strpos($model['id'], 'gpt') !== false) {
+                    $this->valid_models[$model['id']] = true;
+                }
+            }
+
+            // Cache the models list for 24 hours
+            set_transient('wsl_openai_models', $this->valid_models, DAY_IN_SECONDS);
+
+            return $this->valid_models;
+
+        } catch (Exception $e) {
+            error_log('WSL Error fetching models: ' . $e->getMessage());
+            // Fallback to basic models if API call fails
+            return [
+                'gpt-3.5-turbo' => true,
+                'gpt-4' => true,
+                'gpt-4-turbo' => true
+            ];
+        }
+    }
+
+    /**
+     * Check if a model ID is valid
+     *
+     * @param string $model_id Model ID to check
+     * @return bool Whether the model is valid
+     */
+    public function is_valid_model($model_id) {
+        // Try to get cached models first
+        $cached_models = get_transient('wsl_openai_models');
+        if ($cached_models !== false) {
+            return isset($cached_models[$model_id]);
+        }
+
+        // Fetch fresh list if no cache
+        $models = $this->fetch_valid_models();
+        return isset($models[$model_id]);
+    }
 
     /**
      * Initialize OpenAI integration
@@ -12,6 +108,34 @@ class OpenAI_Integration {
     public function __construct() {
         $settings = get_option('wsl_settings');
         $this->api_key = $settings['openai_api_key'] ?? '';
+        
+        // Get and validate model from settings
+        $selected_model = $settings['openai_model'] ?? 'gpt-3.5-turbo';
+        
+        // Validate model, falling back to gpt-3.5-turbo if invalid
+        if (!$this->is_valid_model($selected_model)) {
+            error_log('WSL Warning: Invalid model selected, falling back to gpt-3.5-turbo');
+            $selected_model = 'gpt-3.5-turbo';
+        }
+        
+        $this->model = $selected_model;
+    }
+
+    /**
+     * Get list of available models for admin UI
+     *
+     * @return array Array of valid model IDs
+     */
+    public function get_available_models() {
+        // Try to get cached models first
+        $cached_models = get_transient('wsl_openai_models');
+        if ($cached_models !== false) {
+            return array_keys($cached_models);
+        }
+
+        // Fetch fresh list if no cache
+        $models = $this->fetch_valid_models();
+        return array_keys($models);
     }
 
     /**
@@ -24,14 +148,18 @@ class OpenAI_Integration {
     public function analyze_content_for_links($sections, $post_id) {
         // Check for API key
         if (empty($this->api_key)) {
-            error_log('WSL: No OpenAI API key configured');
-            return [];
+            throw new OpenAI_Exception(
+                'No OpenAI API key configured. Please add your API key in the settings.',
+                OpenAI_Exception::ERROR_NO_API_KEY
+            );
         }
 
         // Validate sections
         if (empty($sections)) {
-            error_log('WSL: No content sections to analyze');
-            return [];
+            throw new OpenAI_Exception(
+                'No content sections to analyze',
+                OpenAI_Exception::ERROR_NO_CONTENT
+            );
         }
 
         // Filter and verify sections before proceeding
@@ -233,7 +361,59 @@ PROMPT;
      * @param string $prompt Prepared prompt
      * @return array Raw API response
      */
+    private function get_cache_key($prompt) {
+        return 'wsl_api_cache_' . md5($prompt . $this->model);
+    }
+
+    private function get_cached_response($prompt) {
+        $cache_key = $this->get_cache_key($prompt);
+        $cached = get_transient($cache_key);
+        
+        if ($cached !== false) {
+            error_log('WSL Debug - Using cached API response');
+            return $cached;
+        }
+        
+        return false;
+    }
+
+    private function cache_response($prompt, $response, $expiry = 3600) {
+        $cache_key = $this->get_cache_key($prompt);
+        set_transient($cache_key, $response, $expiry);
+        error_log('WSL Debug - Cached API response');
+    }
+
+    private function check_rate_limit() {
+        $rate_key = 'wsl_api_rate_limit';
+        $count = get_transient($rate_key);
+        
+        if ($count === false) {
+            set_transient($rate_key, 1, HOUR_IN_SECONDS);
+            return true;
+        }
+        
+        if ($count >= 10) { // Max 10 requests per hour
+            error_log('WSL Debug - Rate limit exceeded');
+            throw new OpenAI_Exception(
+                'Rate limit exceeded. Maximum 10 requests per hour. Please try again later.',
+                OpenAI_Exception::ERROR_RATE_LIMIT
+            );
+        }
+        
+        set_transient($rate_key, $count + 1, HOUR_IN_SECONDS);
+        return true;
+    }
+
     private function get_ai_suggestions($prompt) {
+        // Try to get cached response first
+        $cached = $this->get_cached_response($prompt);
+        if ($cached !== false) {
+            return $cached;
+        }
+
+        // Check rate limit
+        $this->check_rate_limit();
+
         $request_body = [
             'model' => $this->model,
             'messages' => [
@@ -264,7 +444,10 @@ PROMPT;
         ]);
 
         if (is_wp_error($response)) {
-            throw new \Exception('API Request Error: ' . $response->get_error_message());
+            throw new OpenAI_Exception(
+                'API Request Error: ' . $response->get_error_message(),
+                OpenAI_Exception::ERROR_API_ERROR
+            );
         }
 
         $response_code = wp_remote_retrieve_response_code($response);
@@ -274,12 +457,23 @@ PROMPT;
         error_log('WSL Debug - OpenAI Response Body: ' . $response_body);
 
         if ($response_code !== 200) {
-            throw new \Exception('API Error: ' . $response_body);
+            $error_data = json_decode($response_body, true);
+            $error_message = isset($error_data['error']['message'])
+                ? $error_data['error']['message']
+                : 'Unknown API error occurred';
+                
+            throw new OpenAI_Exception(
+                'OpenAI API Error: ' . $error_message,
+                OpenAI_Exception::ERROR_API_ERROR
+            );
         }
 
         $body = json_decode($response_body, true);
         if (empty($body['choices'][0]['message']['content'])) {
-            throw new \Exception('Invalid API response: No content in response');
+            throw new OpenAI_Exception(
+                'Invalid API response: No content returned from OpenAI',
+                OpenAI_Exception::ERROR_INVALID_RESPONSE
+            );
         }
 
         // Clean up the response content
@@ -294,10 +488,26 @@ PROMPT;
         
         if (json_last_error() !== JSON_ERROR_NONE) {
             error_log('WSL Debug - Failed to parse JSON: ' . $content);
-            throw new \Exception('Invalid JSON in API response: ' . json_last_error_msg());
+            throw new OpenAI_Exception(
+                'Invalid JSON in API response: ' . json_last_error_msg(),
+                OpenAI_Exception::ERROR_INVALID_RESPONSE
+            );
+        }
+
+        // Validate response structure
+        if (!isset($suggestions['suggestions']) || !is_array($suggestions['suggestions'])) {
+            error_log('WSL Debug - Invalid response structure: missing suggestions array');
+            throw new OpenAI_Exception(
+                'Invalid response structure: missing suggestions array',
+                OpenAI_Exception::ERROR_INVALID_RESPONSE
+            );
         }
 
         error_log('WSL Debug - Parsed suggestions: ' . print_r($suggestions, true));
+        
+        // Cache successful response
+        $this->cache_response($prompt, $suggestions);
+        
         return $suggestions;
     }
 

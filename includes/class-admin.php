@@ -2,10 +2,14 @@
 namespace WSL;
 
 class Admin {
+    private $openai;
+
     /**
      * Initialize admin functionality
      */
     public function __construct() {
+        global $wsl_instances;
+        $this->openai = $wsl_instances['openai'] ?? null;
         add_action('admin_menu', [$this, 'add_settings_page']);
         add_action('admin_init', [$this, 'register_settings']);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_assets']);
@@ -229,8 +233,57 @@ class Admin {
         <?php
     }
 
-    /**
-     * Sanitize settings
+   /**
+    * Render model selection field
+    */
+   public function render_model_field() {
+       $options = get_option('wsl_settings');
+       $selected_model = $options['openai_model'] ?? 'gpt-3.5-turbo';
+       
+       // Get available models from OpenAI
+       $model_ids = [];
+       if ($this->openai) {
+           try {
+               $model_ids = $this->openai->get_available_models();
+           } catch (OpenAI_Exception $e) {
+               error_log('WSL Error fetching models: ' . $e->getMessage());
+               // Fallback to basic models
+               $model_ids = ['gpt-3.5-turbo', 'gpt-4', 'gpt-4-turbo'];
+           }
+       }
+
+       // Create display names for models
+       $models = [];
+       foreach ($model_ids as $id) {
+           $display_name = ucwords(str_replace(['-', '.'], [' ', ' '], $id));
+           $models[$id] = $display_name;
+       }
+
+       // Sort models alphabetically
+       asort($models);
+       ?>
+       <select
+           id="wsl_openai_model"
+           name="wsl_settings[openai_model]"
+           class="regular-text"
+       >
+           <?php foreach ($models as $value => $label): ?>
+               <option
+                   value="<?php echo esc_attr($value); ?>"
+                   <?php selected($selected_model, $value); ?>
+               >
+                   <?php echo esc_html($label); ?>
+               </option>
+           <?php endforeach; ?>
+       </select>
+       <p class="description">
+           <?php _e('Select which OpenAI model to use for generating link suggestions', 'wp-smart-linker'); ?>
+       </p>
+       <?php
+   }
+
+   /**
+    * Sanitize settings
      *
      * @param array $input The submitted settings
      * @return array Sanitized settings
@@ -241,6 +294,24 @@ class Admin {
         // API Key
         if (isset($input['openai_api_key'])) {
             $sanitized['openai_api_key'] = sanitize_text_field($input['openai_api_key']);
+        }
+
+        // Model
+        if (isset($input['openai_model'])) {
+            $model = sanitize_text_field($input['openai_model']);
+            // Validate model if OpenAI integration is available
+            if ($this->openai && !$this->openai->is_valid_model($model)) {
+                add_settings_error(
+                    'wsl_settings',
+                    'invalid_model',
+                    sprintf(
+                        __('Invalid model "%s" selected. Falling back to gpt-3.5-turbo.', 'wp-smart-linker'),
+                        $model
+                    )
+                );
+                $model = 'gpt-3.5-turbo';
+            }
+            $sanitized['openai_model'] = $model;
         }
         
         // Threshold
