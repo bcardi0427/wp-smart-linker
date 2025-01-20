@@ -146,18 +146,59 @@ class Link_Manager {
                 
                 button.prop('disabled', true)
                      .text('<?php _e("Refreshing...", "wp-smart-linker"); ?>');
+
+                // Get current editor content
+                let postContent = '';
+                if (wp.data && wp.data.select('core/editor')) {
+                    // Gutenberg editor
+                    postContent = wp.data.select('core/editor').getEditedPostContent();
+                } else {
+                    // Classic editor
+                    postContent = $('#content').val();
+                }
                 
                 $.ajax({
                     url: wsl.ajaxurl,
                     type: 'POST',
                     data: {
                         action: 'wsl_refresh_suggestions',
-                        post_id: postId,
+                        post_id: postId || 0,
+                        post_content: postContent,
                         nonce: nonce
                     },
                     success: function(response) {
                         if (response.success) {
-                            location.reload(); // Reload to show new suggestions
+                            // Clear existing suggestions
+                            const tbody = $('.wsl-suggestions tbody');
+                            tbody.empty();
+    
+                            if (response.data.suggestions && response.data.suggestions.length > 0) {
+                                // Add new suggestions
+                                response.data.suggestions.forEach(function(suggestion) {
+                                    const row = $('<tr></tr>');
+                                    row.append($('<td></td>').text(suggestion.section_content.split(' ').slice(0, 10).join(' ') + '...'));
+                                    row.append($('<td></td>').text('Link "' + suggestion.anchor_text + '" to "' + suggestion.target_title + '"'));
+                                    row.append($('<td></td>').text(Math.round(suggestion.relevance_score * 100) + '%'));
+                                    
+                                    const actionCell = $('<td></td>');
+                                    const applyButton = $('<button></button>')
+                                        .addClass('button button-secondary wsl-apply-suggestion')
+                                        .attr('data-suggestion', JSON.stringify(suggestion))
+                                        .attr('data-nonce', '<?php echo wp_create_nonce("wsl_apply_suggestion"); ?>')
+                                        .attr('data-post-id', '<?php echo $post->ID; ?>')
+                                        .text('<?php _e("Apply", "wp-smart-linker"); ?>');
+                                    
+                                    actionCell.append(applyButton);
+                                    row.append(actionCell);
+                                    tbody.append(row);
+                                });
+                            } else {
+                                tbody.append(
+                                    '<tr><td colspan="4">' +
+                                    '<?php _e("No suggestions available", "wp-smart-linker"); ?>' +
+                                    '</td></tr>'
+                                );
+                            }
                         } else {
                             alert(response.data.message || '<?php _e("Error refreshing suggestions", "wp-smart-linker"); ?>');
                         }
@@ -297,7 +338,32 @@ class Link_Manager {
                 throw new \Exception('Invalid security token');
             }
 
-            $post_id = intval($_POST['post_id']);
+            // Handle new post case
+            if (isset($_POST['post_content'])) {
+                // Create a new auto-draft if no post_id
+                if (empty($_POST['post_id'])) {
+                    $post_data = array(
+                        'post_title' => 'Auto Draft',
+                        'post_content' => wp_kses_post($_POST['post_content']),
+                        'post_status' => 'auto-draft',
+                        'post_type' => 'post'
+                    );
+                    $post_id = wp_insert_post($post_data);
+                    if (is_wp_error($post_id)) {
+                        throw new \Exception('Failed to create draft post');
+                    }
+                } else {
+                    $post_id = intval($_POST['post_id']);
+                    // Update existing post content
+                    wp_update_post(array(
+                        'ID' => $post_id,
+                        'post_content' => wp_kses_post($_POST['post_content'])
+                    ));
+                }
+            } else {
+                $post_id = intval($_POST['post_id']);
+            }
+
             if (!$post_id) {
                 throw new \Exception('Invalid post ID');
             }
@@ -312,8 +378,21 @@ class Link_Manager {
                 throw new \Exception('Invalid post');
             }
 
-            // Process suggestions
+            // Process suggestions and get updated list
             $this->process_suggestions($post_id, $post);
+            $suggestions = get_post_meta($post_id, '_wsl_link_suggestions', true) ?: [];
+
+            // Enhance suggestions with target post titles
+            foreach ($suggestions as &$suggestion) {
+                $target_post = get_post($suggestion['target_post_id']);
+                $suggestion['target_title'] = $target_post ? $target_post->post_title : '';
+            }
+
+            wp_send_json_success([
+                'message' => __('Link suggestions refreshed successfully', 'wp-smart-linker'),
+                'suggestions' => $suggestions,
+                'post_id' => $post_id
+            ]);
 
         } catch (\Exception $e) {
             wp_send_json_error([
