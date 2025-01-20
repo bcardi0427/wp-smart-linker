@@ -1,0 +1,120 @@
+/* Smart Linker Admin Styles */
+.wsl-suggestions table {
+    margin-top: 10px;
+}
+
+.wsl-suggestions .threshold-value {
+    display: inline-block;
+    margin-left: 10px;
+    vertical-align: middle;
+}
+
+.wsl-suggestions input[type="range"] {
+    vertical-align: middle;
+    width: 200px;
+}
+
+.wsl-suggestions button.wsl-apply-suggestion {
+    margin-right: 5px;
+}
+
+.wsl-suggestions .spinner {
+    float: none;
+    vertical-align: middle;
+    visibility: visible;
+    display: none;
+}
+
+.wsl-suggestions .spinner.is-active {
+    display: inline-block;
+}
+
+/* Settings page styles */
+.settings_page_wp-smart-linker .form-table th {
+    width: 230px;
+}
+
+.settings_page_wp-smart-linker input[type="range"] {
+    vertical-align: middle;
+    width: 200px;
+}
+
+.settings_page_wp-smart-linker .threshold-value {
+    display: inline-block;
+    margin-left: 10px;
+    min-width: 30px;
+}
+
+.settings_page_wp-smart-linker label {
+    display: inline-block;
+    margin: 5px 0;
+}
+
+/* Meta box styles */
+#wsl_suggestions {
+    margin-top: 10px;
+}
+
+#wsl_suggestions .inside {
+    margin: 0;
+    padding: 0;
+}
+
+#wsl_suggestions .widefat {
+    border-left: none;
+    border-right: none;
+    border-top: none;
+}
+
+#wsl_suggestions .widefat th {
+    padding: 8px 10px;
+}
+
+#wsl_suggestions .widefat td {
+    padding: 12px 10px;
+    vertical-align: middle;
+}
+
+#wsl_suggestions .section-preview {
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#wsl_suggestions .relevance-score {
+    min-width: 60px;
+    text-align: center;
+}
+
+#wsl_suggestions .actions {
+    text-align: right;
+    white-space: nowrap;
+}
+
+/* Success/Error messages */
+.wsl-notice {
+    background: #fff;
+    border-left: 4px solid #fff;
+    box-shadow: 0 1px 1px 0 rgba(0,0,0,.1);
+    margin: 5px 0 15px;
+    padding: 1px 12px;
+}
+
+.wsl-notice-success {
+    border-left-color: #46b450;
+}
+
+.wsl-notice-error {
+    border-left-color: #dc3232;
+}
+
+/* Loading states */
+.wsl-loading {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+.wsl-loading button {
+    cursor: wait !important;
+}
