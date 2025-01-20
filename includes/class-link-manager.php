@@ -62,8 +62,18 @@ class Link_Manager {
         
         ?>
         <div class="wsl-suggestions">
+            <div class="wsl-suggestions-header">
+                <button
+                    type="button"
+                    class="button button-secondary wsl-refresh-suggestions"
+                    data-nonce="<?php echo wp_create_nonce('wsl_refresh_suggestions'); ?>"
+                    data-post-id="<?php echo esc_attr($post->ID); ?>"
+                >
+                    <?php _e('Refresh Suggestions', 'wp-smart-linker'); ?>
+                </button>
+            </div>
             <?php if (empty($suggestions)): ?>
-                <p><?php _e('No link suggestions available. Suggestions will be generated when you save the post.', 'wp-smart-linker'); ?></p>
+                <p><?php _e('No link suggestions available. Click the refresh button or save the post to generate suggestions.', 'wp-smart-linker'); ?></p>
             <?php else: ?>
                 <table class="widefat">
                     <thead>
@@ -117,8 +127,51 @@ class Link_Manager {
                 </table>
             <?php endif; ?>
         </div>
+        <style>
+        .wsl-suggestions-header {
+            margin-bottom: 15px;
+            padding: 10px 0;
+            border-bottom: 1px solid #ddd;
+        }
+        </style>
         <script>
         jQuery(document).ready(function($) {
+            // Handle refresh suggestions
+            $('.wsl-refresh-suggestions').on('click', function(e) {
+                e.preventDefault();
+                const button = $(this);
+                const nonce = button.data('nonce');
+                const postId = button.data('post-id');
+                
+                button.prop('disabled', true)
+                     .text('<?php _e("Refreshing...", "wp-smart-linker"); ?>');
+                
+                $.ajax({
+                    url: wsl.ajaxurl,
+                    type: 'POST',
+                    data: {
+                        action: 'wsl_refresh_suggestions',
+                        post_id: postId,
+                        nonce: nonce
+                    },
+                    success: function(response) {
+                        if (response.success) {
+                            location.reload(); // Reload to show new suggestions
+                        } else {
+                            alert(response.data.message || '<?php _e("Error refreshing suggestions", "wp-smart-linker"); ?>');
+                        }
+                    },
+                    error: function() {
+                        alert('<?php _e("Error refreshing suggestions", "wp-smart-linker"); ?>');
+                    },
+                    complete: function() {
+                        button.prop('disabled', false)
+                             .text('<?php _e("Refresh Suggestions", "wp-smart-linker"); ?>');
+                    }
+                });
+            });
+    
+            // Handle apply suggestion
             $('.wsl-apply-suggestion').on('click', function(e) {
                 e.preventDefault();
                 const button = $(this);
@@ -185,27 +238,51 @@ class Link_Manager {
      * @param int $post_id Post ID
      * @param WP_Post $post Post object
      */
+    public function __construct() {
+        global $wsl_instances;
+        
+        // Set up dependencies if available
+        if (!empty($wsl_instances)) {
+            $this->content_processor = $wsl_instances['content_processor'] ?? null;
+            $this->openai_integration = $wsl_instances['openai'] ?? null;
+        }
+        
+        // Add hooks only if dependencies are available
+        if ($this->content_processor && $this->openai_integration) {
+            add_action('add_meta_boxes', [$this, 'add_meta_box']);
+            add_action('save_post', [$this, 'process_suggestions'], 20, 2);
+            add_action('wp_ajax_wsl_apply_suggestion', [$this, 'ajax_apply_suggestion']);
+            add_action('wp_ajax_wsl_refresh_suggestions', [$this, 'ajax_refresh_suggestions']);
+        }
+    }
+
     public function process_suggestions($post_id, $post) {
         // Skip if dependencies aren't available
         if (!$this->content_processor || !$this->openai_integration) {
             return;
         }
 
-        // Skip if not proper save
+        // Skip if autosave
         if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) return;
         if (!current_user_can('edit_post', $post_id)) return;
-        
-        // Verify nonce
-        if (!isset($_POST['wsl_meta_box_nonce']) ||
-            !wp_verify_nonce($_POST['wsl_meta_box_nonce'], 'wsl_meta_box')) {
+
+        // Process on manual refresh or if nonce verified
+        $is_manual_refresh = isset($_POST['action']) && $_POST['action'] === 'wsl_refresh_suggestions';
+        $is_valid_save = isset($_POST['wsl_meta_box_nonce']) &&
+                        wp_verify_nonce($_POST['wsl_meta_box_nonce'], 'wsl_meta_box');
+
+        if (!$is_manual_refresh && !$is_valid_save) {
             return;
         }
 
-        // Get content sections
-        $sections = get_post_meta($post_id, '_wsl_content_sections', true);
-        if (empty($sections)) return;
-
         try {
+            // Get content sections
+            $sections = $this->content_processor->get_content_sections($post->post_content);
+            if (empty($sections)) return;
+
+            // Store sections for later use
+            update_post_meta($post_id, '_wsl_content_sections', $sections);
+
             // Get suggestions from OpenAI
             $suggestions = $this->openai_integration->analyze_content_for_links($sections, $post_id);
             
@@ -213,8 +290,51 @@ class Link_Manager {
             if (!empty($suggestions)) {
                 update_post_meta($post_id, '_wsl_link_suggestions', $suggestions);
             }
+
+            if ($is_manual_refresh) {
+                wp_send_json_success([
+                    'message' => __('Link suggestions refreshed successfully', 'wp-smart-linker')
+                ]);
+            }
         } catch (\Exception $e) {
             error_log('WSL Error: ' . $e->getMessage());
+            if ($is_manual_refresh) {
+                wp_send_json_error([
+                    'message' => $e->getMessage()
+                ]);
+            }
+        }
+    }
+
+    public function ajax_refresh_suggestions() {
+        try {
+            // Verify nonce
+            if (!wp_verify_nonce($_POST['nonce'], 'wsl_refresh_suggestions')) {
+                throw new \Exception('Invalid security token');
+            }
+
+            $post_id = intval($_POST['post_id']);
+            if (!$post_id) {
+                throw new \Exception('Invalid post ID');
+            }
+
+            // Check permissions
+            if (!current_user_can('edit_post', $post_id)) {
+                throw new \Exception('Permission denied');
+            }
+
+            $post = get_post($post_id);
+            if (!$post) {
+                throw new \Exception('Invalid post');
+            }
+
+            // Process suggestions
+            $this->process_suggestions($post_id, $post);
+
+        } catch (\Exception $e) {
+            wp_send_json_error([
+                'message' => $e->getMessage()
+            ]);
         }
     }
 
