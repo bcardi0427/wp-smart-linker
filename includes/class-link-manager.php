@@ -172,12 +172,19 @@ class Link_Manager {
                             const tbody = $('.wsl-suggestions tbody');
                             tbody.empty();
     
-                            if (response.data.suggestions && response.data.suggestions.length > 0) {
+                            if (response.data.suggestions && Object.keys(response.data.suggestions).length > 0) {
                                 // Add new suggestions
                                 response.data.suggestions.forEach(function(suggestion) {
+                                    const words = suggestion.section_content.split(/\s+/).slice(0, 10);
+                                    const preview = words.join(' ') + (words.length >= 10 ? '...' : '');
+                                    
                                     const row = $('<tr></tr>');
-                                    row.append($('<td></td>').text(suggestion.section_content.split(' ').slice(0, 10).join(' ') + '...'));
-                                    row.append($('<td></td>').text('Link "' + suggestion.anchor_text + '" to "' + suggestion.target_title + '"'));
+                                    row.append($('<td></td>').text(preview));
+                                    row.append($('<td></td>')
+                                        .html('<?php _e("Link", "wp-smart-linker"); ?> "' +
+                                              $('<div/>').text(suggestion.anchor_text).html() +
+                                              '" <?php _e("to", "wp-smart-linker"); ?> "' +
+                                              $('<div/>').text(suggestion.target_title).html() + '"'));
                                     row.append($('<td></td>').text(Math.round(suggestion.relevance_score * 100) + '%'));
                                     
                                     const actionCell = $('<td></td>');
@@ -382,11 +389,27 @@ class Link_Manager {
             $this->process_suggestions($post_id, $post);
             $suggestions = get_post_meta($post_id, '_wsl_link_suggestions', true) ?: [];
 
-            // Enhance suggestions with target post titles
+            // Enhance suggestions with target post titles and clean section content
             foreach ($suggestions as &$suggestion) {
                 $target_post = get_post($suggestion['target_post_id']);
-                $suggestion['target_title'] = $target_post ? $target_post->post_title : '';
+                if (!$target_post) {
+                    continue;
+                }
+                $suggestion['target_title'] = $target_post->post_title;
+                
+                // Clean and truncate section content for preview
+                $content = wp_strip_all_tags($suggestion['section_content']);
+                $content = preg_replace('/\s+/', ' ', $content); // Normalize whitespace
+                $suggestion['section_content'] = $content;
             }
+
+            // Remove any suggestions where target post wasn't found
+            $suggestions = array_filter($suggestions, function($s) {
+                return !empty($s['target_title']);
+            });
+
+            // Reset array keys
+            $suggestions = array_values($suggestions);
 
             wp_send_json_success([
                 'message' => __('Link suggestions refreshed successfully', 'wp-smart-linker'),
