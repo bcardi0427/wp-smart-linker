@@ -261,7 +261,7 @@ class Link_Manager {
 
         try {
             // Get content sections
-            $sections = $this->content_processor->get_content_sections($post->post_content);
+            $sections = $this->content_processor->analyze_content($post->post_content);
             if (empty($sections)) return;
 
             // Store sections for later use
