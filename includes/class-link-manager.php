@@ -71,14 +71,17 @@ class Link_Manager {
         ?>
         <div class="wsl-suggestions">
             <div class="wsl-suggestions-header">
-                <button
-                    type="button"
-                    class="button button-secondary wsl-refresh-suggestions"
-                    data-nonce="<?php echo wp_create_nonce('wsl_refresh_suggestions'); ?>"
-                    data-post-id="<?php echo esc_attr($post->ID); ?>"
-                >
-                    <?php _e('Refresh Suggestions', 'wp-smart-linker'); ?>
-                </button>
+                <div class="wsl-refresh-wrapper">
+                    <button
+                        type="button"
+                        class="button button-secondary wsl-refresh-suggestions"
+                        data-nonce="<?php echo wp_create_nonce('wsl_refresh_suggestions'); ?>"
+                        data-post-id="<?php echo esc_attr($post->ID); ?>"
+                    >
+                        <?php _e('Refresh Suggestions', 'wp-smart-linker'); ?>
+                    </button>
+                    <span class="wsl-save-reminder"><?php _e('⚠️ Save post first', 'wp-smart-linker'); ?></span>
+                </div>
             </div>
             <?php if (empty($suggestions)): ?>
                 <p><?php _e('No link suggestions available. Click the refresh button or save the post to generate suggestions.', 'wp-smart-linker'); ?></p>
@@ -140,6 +143,16 @@ class Link_Manager {
             margin-bottom: 15px;
             padding: 10px 0;
             border-bottom: 1px solid #ddd;
+        }
+        .wsl-refresh-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .wsl-save-reminder {
+            color: #d63638;
+            font-size: 13px;
+            font-weight: 500;
         }
         </style>
         <script>
