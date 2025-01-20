@@ -46,7 +46,14 @@ jQuery(document).ready(function($) {
                 action: 'wsl_refresh_suggestions',
                 post_id: $('#post_ID').val() || 0,
                 post_content: postContent,
-                nonce: $button.data('nonce')
+                nonce: wsl.nonce
+            },
+            beforeSend: function() {
+                console.log('Sending refresh request with:', {
+                    postId: $('#post_ID').val() || 0,
+                    contentLength: postContent.length,
+                    nonce: wsl.nonce
+                });
             },
             success: function(response) {
                 if (response.success) {
@@ -71,8 +78,13 @@ jQuery(document).ready(function($) {
                     showNotice(response.data.message || 'Error refreshing suggestions', 'error');
                 }
             },
-            error: function() {
-                showNotice('Error refreshing suggestions', 'error');
+            error: function(xhr, status, error) {
+                console.error('AJAX error:', {
+                    status: status,
+                    error: error,
+                    response: xhr.responseText
+                });
+                showNotice('Error refreshing suggestions: ' + error, 'error');
             },
             complete: function() {
                 $button.prop('disabled', false).text('Refresh Suggestions');
@@ -220,7 +232,7 @@ jQuery(document).ready(function($) {
             .attr({
                 'type': 'button',
                 'data-suggestion': JSON.stringify(suggestion),
-                'data-nonce': $('.wsl-refresh-suggestions').data('nonce'),
+                'data-nonce': wsl.apply_nonce,
                 'data-post-id': $('#post_ID').val()
             })
             .text('Apply');

@@ -11,11 +11,17 @@ class Link_Manager {
     public function __construct() {
         global $wsl_instances;
         
+        error_log('WSL Debug - Link Manager initialization started');
+        
         // Set up dependencies if available
         if (!empty($wsl_instances)) {
             $this->content_processor = $wsl_instances['content_processor'] ?? null;
             $this->openai_integration = $wsl_instances['openai'] ?? null;
         }
+
+        error_log('WSL Debug - Dependencies loaded: ' .
+            'Content Processor: ' . ($this->content_processor ? 'Yes' : 'No') . ', ' .
+            'OpenAI Integration: ' . ($this->openai_integration ? 'Yes' : 'No'));
         
         // Add hooks only if dependencies are available
         if ($this->content_processor && $this->openai_integration) {
@@ -44,7 +50,8 @@ class Link_Manager {
         wp_enqueue_script('wsl-admin', plugins_url('assets/js/admin.js', dirname(__FILE__)), ['jquery'], WSL_VERSION, true);
         wp_localize_script('wsl-admin', 'wsl', [
             'ajaxurl' => admin_url('admin-ajax.php'),
-            'nonce' => wp_create_nonce('wsl_apply_suggestion')
+            'nonce' => wp_create_nonce('wsl_refresh_suggestions'),
+            'apply_nonce' => wp_create_nonce('wsl_apply_suggestion')
         ]);
     }
 
@@ -141,8 +148,15 @@ class Link_Manager {
             $('.wsl-refresh-suggestions').on('click', function(e) {
                 e.preventDefault();
                 const button = $(this);
-                const nonce = button.data('nonce');
-                const postId = button.data('post-id');
+                
+                // Show confirmation if content is not saved
+                if (wp.data && wp.data.select('core/editor') && wp.data.select('core/editor').isEditedPostDirty()) {
+                    if (!confirm('<?php _e("You have unsaved changes. Save your post first?", "wp-smart-linker"); ?>')) {
+                        return;
+                    }
+                    wp.data.dispatch('core/editor').savePost();
+                    return;
+                }
                 
                 button.prop('disabled', true)
                      .text('<?php _e("Refreshing...", "wp-smart-linker"); ?>');
@@ -156,6 +170,10 @@ class Link_Manager {
                     // Classic editor
                     postContent = $('#content').val();
                 }
+
+                // Show loading message in suggestions area
+                const suggestionsArea = $('.wsl-suggestions');
+                suggestionsArea.html('<p><?php _e("Analyzing content...", "wp-smart-linker"); ?></p>');
                 
                 $.ajax({
                     url: wsl.ajaxurl,
@@ -167,42 +185,23 @@ class Link_Manager {
                         nonce: nonce
                     },
                     success: function(response) {
-                        if (response.success) {
-                            // Clear existing suggestions
+                        if (response.success && response.data.suggestions) {
                             const tbody = $('.wsl-suggestions tbody');
                             tbody.empty();
     
-                            if (response.data.suggestions && Object.keys(response.data.suggestions).length > 0) {
-                                // Add new suggestions
+                            if (response.data.suggestions.length > 0) {
                                 response.data.suggestions.forEach(function(suggestion) {
-                                    const words = suggestion.section_content.split(/\s+/).slice(0, 10);
-                                    const preview = words.join(' ') + (words.length >= 10 ? '...' : '');
-                                    
-                                    const row = $('<tr></tr>');
-                                    row.append($('<td></td>').text(preview));
-                                    row.append($('<td></td>')
-                                        .html('<?php _e("Link", "wp-smart-linker"); ?> "' +
-                                              $('<div/>').text(suggestion.anchor_text).html() +
-                                              '" <?php _e("to", "wp-smart-linker"); ?> "' +
-                                              $('<div/>').text(suggestion.target_title).html() + '"'));
-                                    row.append($('<td></td>').text(Math.round(suggestion.relevance_score * 100) + '%'));
-                                    
-                                    const actionCell = $('<td></td>');
-                                    const applyButton = $('<button></button>')
-                                        .addClass('button button-secondary wsl-apply-suggestion')
-                                        .attr('data-suggestion', JSON.stringify(suggestion))
-                                        .attr('data-nonce', '<?php echo wp_create_nonce("wsl_apply_suggestion"); ?>')
-                                        .attr('data-post-id', '<?php echo $post->ID; ?>')
-                                        .text('<?php _e("Apply", "wp-smart-linker"); ?>');
-                                    
-                                    actionCell.append(applyButton);
-                                    row.append(actionCell);
+                                    // Create table row with suggestion
+                                    const row = createSuggestionRow(suggestion, nonce, postId);
                                     tbody.append(row);
                                 });
+    
+                                // Rebind click handlers for new buttons
+                                bindApplyButtonHandlers();
                             } else {
                                 tbody.append(
                                     '<tr><td colspan="4">' +
-                                    '<?php _e("No suggestions available", "wp-smart-linker"); ?>' +
+                                    '<?php _e("No suggestions found for this content", "wp-smart-linker"); ?>' +
                                     '</td></tr>'
                                 );
                             }
@@ -210,7 +209,8 @@ class Link_Manager {
                             alert(response.data.message || '<?php _e("Error refreshing suggestions", "wp-smart-linker"); ?>');
                         }
                     },
-                    error: function() {
+                    error: function(xhr, status, error) {
+                        console.error('AJAX Error:', status, error);
                         alert('<?php _e("Error refreshing suggestions", "wp-smart-linker"); ?>');
                     },
                     complete: function() {
@@ -345,37 +345,44 @@ class Link_Manager {
                 throw new \Exception('Invalid security token');
             }
 
-            // Handle new post case
-            if (isset($_POST['post_content'])) {
-                // Create a new auto-draft if no post_id
-                if (empty($_POST['post_id'])) {
-                    $post_data = array(
-                        'post_title' => 'Auto Draft',
-                        'post_content' => wp_kses_post($_POST['post_content']),
-                        'post_status' => 'auto-draft',
-                        'post_type' => 'post'
-                    );
-                    $post_id = wp_insert_post($post_data);
-                    if (is_wp_error($post_id)) {
-                        throw new \Exception('Failed to create draft post');
+            error_log('WSL Debug - AJAX refresh request received: ' . print_r($_POST, true));
+
+            // Get post ID and content
+            $post_id = isset($_POST['post_id']) ? intval($_POST['post_id']) : 0;
+            $post_content = isset($_POST['post_content']) ? wp_kses_post($_POST['post_content']) : '';
+
+            error_log('WSL Debug - Processing with post_id: ' . $post_id);
+            error_log('WSL Debug - Content length: ' . strlen($post_content));
+
+            // Handle post content directly if provided
+            if (!empty($post_content)) {
+                error_log('WSL Debug - Using provided content for analysis');
+                $sections = $this->content_processor->analyze_content($post_content);
+                if (!empty($sections)) {
+                    error_log('WSL Debug - Content analysis found sections: ' . count($sections));
+                    $suggestions = $this->openai_integration->analyze_content_for_links($sections, $post_id);
+                    
+                    // Enhance suggestions with target titles
+                    foreach ($suggestions as &$suggestion) {
+                        $target_post = get_post($suggestion['target_post_id']);
+                        if ($target_post) {
+                            $suggestion['target_title'] = $target_post->post_title;
+                        }
                     }
-                } else {
-                    $post_id = intval($_POST['post_id']);
-                    // Update existing post content
-                    wp_update_post(array(
-                        'ID' => $post_id,
-                        'post_content' => wp_kses_post($_POST['post_content'])
-                    ));
+
+                    wp_send_json_success([
+                        'message' => __('Link suggestions generated successfully', 'wp-smart-linker'),
+                        'suggestions' => array_values($suggestions)
+                    ]);
+                    return;
                 }
-            } else {
-                $post_id = intval($_POST['post_id']);
             }
 
+            // If no content provided or sections found, try to use existing post
             if (!$post_id) {
-                throw new \Exception('Invalid post ID');
+                throw new \Exception('No content or post ID provided');
             }
 
-            // Check permissions
             if (!current_user_can('edit_post', $post_id)) {
                 throw new \Exception('Permission denied');
             }
@@ -384,6 +391,8 @@ class Link_Manager {
             if (!$post) {
                 throw new \Exception('Invalid post');
             }
+
+            error_log('WSL Debug - Using post content for analysis');
 
             // Process suggestions and get updated list
             $this->process_suggestions($post_id, $post);
