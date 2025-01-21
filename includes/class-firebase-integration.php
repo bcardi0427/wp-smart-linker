@@ -44,7 +44,7 @@ class Firebase_Integration {
         $token = [
             'iss' => $this->credentials['client_email'],
             'sub' => $this->credentials['client_email'],
-            'aud' => 'https://identitytoolkit.googleapis.com/google.identity.identitytoolkit.v1.IdentityToolkit',
+            'aud' => 'https://firestore.googleapis.com/',
             'iat' => $now,
             'exp' => $now + 3600, // Token expires in 1 hour
             'uid' => 'wsl-service-account'
@@ -80,6 +80,87 @@ class Firebase_Integration {
     }
 
     /**
+     * Convert PHP value to Firestore value format
+     *
+     * @param mixed $value The PHP value to convert
+     * @return array The Firestore value representation
+     */
+    private function convert_to_firestore_value($value) {
+        if (is_null($value)) {
+            return ['nullValue' => null];
+        } elseif (is_bool($value)) {
+            return ['booleanValue' => $value];
+        } elseif (is_int($value)) {
+            return ['integerValue' => (string)$value];
+        } elseif (is_float($value)) {
+            return ['doubleValue' => $value];
+        } elseif (is_string($value)) {
+            return ['stringValue' => $value];
+        } elseif (is_array($value)) {
+            if (array_keys($value) !== range(0, count($value) - 1)) {
+                // Associative array (map)
+                $fields = [];
+                foreach ($value as $k => $v) {
+                    $fields[$k] = $this->convert_to_firestore_value($v);
+                }
+                return ['mapValue' => ['fields' => $fields]];
+            } else {
+                // Sequential array
+                $arrayValues = [];
+                foreach ($value as $v) {
+                    $arrayValues[] = $this->convert_to_firestore_value($v);
+                }
+                return ['arrayValue' => ['values' => $arrayValues]];
+            }
+        }
+        throw new \Exception('Unsupported value type for Firestore: ' . gettype($value));
+    }
+
+    /**
+     * Convert Firestore value to PHP value
+     *
+     * @param array $value The Firestore value to convert
+     * @return mixed The PHP value
+     */
+    private function convert_from_firestore_value($value) {
+        if (!is_array($value) || empty($value)) {
+            return null;
+        }
+
+        $type = key($value);
+        $val = current($value);
+
+        switch ($type) {
+            case 'nullValue':
+                return null;
+            case 'booleanValue':
+                return (bool)$val;
+            case 'integerValue':
+                return (int)$val;
+            case 'doubleValue':
+                return (float)$val;
+            case 'stringValue':
+                return (string)$val;
+            case 'mapValue':
+                if (!isset($val['fields'])) {
+                    return [];
+                }
+                $result = [];
+                foreach ($val['fields'] as $k => $v) {
+                    $result[$k] = $this->convert_from_firestore_value($v);
+                }
+                return $result;
+            case 'arrayValue':
+                if (!isset($val['values'])) {
+                    return [];
+                }
+                return array_map([$this, 'convert_from_firestore_value'], $val['values']);
+            default:
+                return null;
+        }
+    }
+
+    /**
      * Check if Firebase is properly configured
      */
     public function is_configured() {
@@ -105,7 +186,7 @@ class Firebase_Integration {
      * @param array $data Data to send
      * @return array Response data
      */
-    private function make_request($endpoint, $method = 'GET', $data = null) {
+    private function make_request($collection, $method = 'GET', $data = null, $doc_id = null) {
         if (!$this->is_configured()) {
             throw new \Exception('Firebase not properly configured');
         }
@@ -115,21 +196,34 @@ class Firebase_Integration {
             $this->generate_jwt_token();
         }
 
-        $url = rtrim($this->database_url, '/') . '/' . ltrim($endpoint, '/') . '.json';
-        $url .= '?access_token=' . urlencode($this->jwt_token);
+        // Build Firestore REST API URL
+        $project_id = $this->credentials['project_id'];
+        $base_url = "https://firestore.googleapis.com/v1/projects/{$project_id}/databases/(default)/documents";
+        
+        if ($doc_id) {
+            $url = "{$base_url}/{$collection}/{$doc_id}";
+        } else {
+            $url = "{$base_url}/{$collection}";
+        }
 
         $args = [
-            'method' => $method,
-            'headers' => [
-                'Content-Type' => 'application/json',
-                'Accept' => 'application/json'
-            ],
-            'timeout' => 30,
-        ];
+           'method' => $method,
+           'headers' => [
+               'Content-Type' => 'application/json',
+               'Accept' => 'application/json',
+               'Authorization' => 'Bearer ' . $this->jwt_token
+           ],
+           'timeout' => 30,
+       ];
 
-        if ($data !== null) {
-            $args['body'] = json_encode($data);
-        }
+       if ($data !== null) {
+           // Convert PHP data to Firestore format
+           $fields = [];
+           foreach ($data as $key => $value) {
+               $fields[$key] = $this->convert_to_firestore_value($value);
+           }
+           $args['body'] = json_encode(['fields' => $fields]);
+       }
 
         error_log("WSL Debug - Making Firebase request to: $url");
 
@@ -366,32 +460,41 @@ class Firebase_Integration {
 
             // Store current credentials
             $current_creds = $this->credentials;
-            $current_db_url = $this->database_url;
 
             // Temporarily set test credentials
             $this->credentials = $temp_creds;
-            $this->database_url = "https://{$temp_creds['project_id']}.firebaseio.com";
             
             // Clear any existing token
             $this->jwt_token = null;
             $this->token_expires = null;
-// Try to write to a test location
-$test_data = ['timestamp' => time(), 'test' => true];
-$result = $this->make_request('wsl_connection_test', 'PUT', $test_data);
 
-// Clean up test data
-$this->make_request('wsl_connection_test', 'DELETE');
+            // Try to create a test document
+            $test_id = 'test_' . time();
+            $test_data = ['timestamp' => time(), 'test' => true];
+            
+            // This will throw an exception if it fails
+            $result = $this->make_request('wsl_connection_tests', 'POST', $test_data, $test_id);
+            
+            // If we get here, the connection worked. Clean up the test document
+            if ($result) {
+                $this->make_request('wsl_connection_tests', 'DELETE', null, $test_id);
+            }
+            
+            // Restore original credentials
+            $this->credentials = $current_creds;
+            $this->jwt_token = null;
+            $this->token_expires = null;
 
-// Restore original credentials
-$this->credentials = $current_creds;
-$this->database_url = $current_db_url;
-$this->jwt_token = null;
-$this->token_expires = null;
-
-return isset($result['timestamp']);
             return true;
 
         } catch (\Exception $e) {
+            // Restore original credentials
+            if (isset($current_creds)) {
+                $this->credentials = $current_creds;
+                $this->jwt_token = null;
+                $this->token_expires = null;
+            }
+            
             error_log('WSL Firebase Test Error: ' . $e->getMessage());
             throw new \Exception($e->getMessage());
         }
