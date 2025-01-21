@@ -38,6 +38,49 @@ jQuery(document).ready(function($) {
             }
         });
     });
+
+    // Handle Firebase sync
+    $('#wsl_sync_firebase').on('click', function() {
+        var $button = $(this);
+        var $result = $('#wsl_sync_result');
+
+        // Confirm before proceeding
+        if (!confirm('This will sync all published posts and pages to Firebase. Continue?')) {
+            return;
+        }
+
+        // Disable button and show syncing message
+        $button.prop('disabled', true);
+        $result.html(wslAdmin.syncingPosts)
+               .removeClass('notice-error notice-success')
+               .show();
+
+        // Make AJAX request
+        $.ajax({
+            url: wslAdmin.ajaxurl,
+            method: 'POST',
+            data: {
+                action: 'wsl_sync_firebase',
+                nonce: wslAdmin.nonce
+            },
+            success: function(response) {
+                if (response.success) {
+                    $result.html(wslAdmin.syncSuccess)
+                           .addClass('notice-success');
+                } else {
+                    $result.html(wslAdmin.syncFailed + response.data)
+                           .addClass('notice-error');
+                }
+            },
+            error: function() {
+                $result.html(wslAdmin.syncFailed + 'AJAX request failed')
+                       .addClass('notice-error');
+            },
+            complete: function() {
+                $button.prop('disabled', false);
+            }
+        });
+    });
 });
 jQuery(document).ready(function($) {
     // Save post using REST API

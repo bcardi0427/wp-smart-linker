@@ -1,29 +1,56 @@
-/* Firebase Test Connection */
-#wsl_firebase_test_result {
-    display: inline-block;
-    padding: 5px 10px;
-    margin-left: 10px;
-    border-radius: 4px;
-}
-
-#wsl_firebase_test_result.notice-success {
-    background-color: #ecf7ed;
-    color: #1b7a3d;
-    border: 1px solid #c3e6cb;
-}
-
-#wsl_firebase_test_result.notice-error {
-    background-color: #f8d7da;
-    color: #721c24;
-    border: 1px solid #f5c6cb;
-}
-
+/* Firebase Actions */
 .firebase-credentials-section {
     margin-bottom: 15px;
 }
 
 .firebase-actions {
     margin: 10px 0;
+}
+
+.firebase-actions .action-row {
+    margin: 10px 0;
+    padding: 10px;
+    background: #f8f9fa;
+    border-radius: 4px;
+}
+
+.firebase-actions .action-row .description {
+    margin: 5px 0 0 0;
+    color: #666;
+}
+
+/* Result Messages */
+#wsl_firebase_test_result,
+#wsl_sync_result {
+    display: inline-block;
+    padding: 5px 10px;
+    margin-left: 10px;
+    border-radius: 4px;
+    font-weight: 500;
+}
+
+#wsl_firebase_test_result.notice-success,
+#wsl_sync_result.notice-success {
+    background-color: #ecf7ed;
+    color: #1b7a3d;
+    border: 1px solid #c3e6cb;
+}
+
+#wsl_firebase_test_result.notice-error,
+#wsl_sync_result.notice-error {
+    background-color: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+}
+
+/* Buttons */
+.firebase-actions button {
+    min-width: 120px;
+}
+
+.firebase-actions button:disabled {
+    cursor: not-allowed;
+    opacity: 0.7;
 }
 /* Smart Linker Admin Styles */
 .wsl-suggestions table {

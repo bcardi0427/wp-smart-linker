@@ -17,6 +17,7 @@ class Admin {
         add_action('admin_init', [$this, 'register_settings']);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_assets']);
         add_action('wp_ajax_wsl_test_firebase', [$this, 'handle_firebase_test']);
+        add_action('wp_ajax_wsl_sync_firebase', [$this, 'handle_firebase_sync']);
     }
 
     /**
@@ -136,7 +137,10 @@ class Admin {
             'nonce' => wp_create_nonce('wsl_firebase_test'),
             'testingConnection' => __('Testing connection...', 'wp-smart-linker'),
             'connectionSuccess' => __('Connection successful!', 'wp-smart-linker'),
-            'connectionFailed' => __('Connection failed: ', 'wp-smart-linker')
+            'connectionFailed' => __('Connection failed: ', 'wp-smart-linker'),
+            'syncingPosts' => __('Syncing posts...', 'wp-smart-linker'),
+            'syncSuccess' => __('Posts synced successfully!', 'wp-smart-linker'),
+            'syncFailed' => __('Sync failed: ', 'wp-smart-linker')
         ]);
     }
 
@@ -342,10 +346,24 @@ class Admin {
            ><?php echo esc_textarea($options['firebase_credentials'] ?? ''); ?></textarea>
 
            <div class="firebase-actions">
-               <button type="button" id="wsl_test_firebase" class="button button-secondary">
-                   <?php _e('Test Connection', 'wp-smart-linker'); ?>
-               </button>
-               <span id="wsl_firebase_test_result" style="margin-left: 10px; display: none;"></span>
+               <div class="action-row">
+                   <button type="button" id="wsl_test_firebase" class="button button-secondary">
+                       <?php _e('Test Connection', 'wp-smart-linker'); ?>
+                   </button>
+                   <span id="wsl_firebase_test_result" style="margin-left: 10px; display: none;"></span>
+               </div>
+               
+               <?php if ($has_credentials): ?>
+               <div class="action-row" style="margin-top: 10px;">
+                   <button type="button" id="wsl_sync_firebase" class="button button-secondary">
+                       <?php _e('Sync All Posts', 'wp-smart-linker'); ?>
+                   </button>
+                   <span id="wsl_sync_result" style="margin-left: 10px; display: none;"></span>
+                   <p class="description">
+                       <?php _e('This will sync all published posts and pages to Firebase for faster link suggestions.', 'wp-smart-linker'); ?>
+                   </p>
+               </div>
+               <?php endif; ?>
            </div>
            
            <p class="description">
@@ -486,6 +504,35 @@ class Admin {
 
         } catch (\Exception $e) {
             wp_send_json_error($e->getMessage());
+        }
+    
+        /**
+         * Handle Firebase sync AJAX request
+         */
+        public function handle_firebase_sync() {
+            check_ajax_referer('wsl_firebase_test', 'nonce');
+    
+            if (!current_user_can('manage_options')) {
+                wp_send_json_error(__('Unauthorized', 'wp-smart-linker'));
+            }
+    
+            try {
+                if (!$this->firebase || !$this->firebase->is_configured()) {
+                    throw new \Exception(__('Firebase is not properly configured', 'wp-smart-linker'));
+                }
+    
+                // Start the sync process
+                $result = $this->firebase->sync_data();
+                
+                if ($result === false) {
+                    throw new \Exception(__('Sync process failed', 'wp-smart-linker'));
+                }
+    
+                wp_send_json_success(__('All posts have been synced to Firebase', 'wp-smart-linker'));
+    
+            } catch (\Exception $e) {
+                wp_send_json_error($e->getMessage());
+            }
         }
     }
 }
