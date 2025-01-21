@@ -351,6 +351,49 @@ class Firebase_Integration {
     }
 
     /**
+     * Test Firebase connection with given credentials
+     *
+     * @param string $test_credentials JSON string of credentials to test
+     * @return bool Whether connection was successful
+     */
+    public function test_connection($test_credentials) {
+        try {
+            // Parse and validate credentials
+            $temp_creds = json_decode($test_credentials, true);
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                throw new \Exception('Invalid JSON format');
+            }
+
+            // Store current credentials
+            $current_creds = $this->credentials;
+            $current_db_url = $this->database_url;
+
+            // Temporarily set test credentials
+            $this->credentials = $temp_creds;
+            $this->database_url = "https://{$temp_creds['project_id']}.firebaseio.com";
+            
+            // Clear any existing token
+            $this->jwt_token = null;
+            $this->token_expires = null;
+
+            // Try to make a test request
+            $result = $this->make_request('test', 'GET');
+            
+            // Restore original credentials
+            $this->credentials = $current_creds;
+            $this->database_url = $current_db_url;
+            $this->jwt_token = null;
+            $this->token_expires = null;
+
+            return true;
+
+        } catch (\Exception $e) {
+            error_log('WSL Firebase Test Error: ' . $e->getMessage());
+            throw new \Exception($e->getMessage());
+        }
+    }
+
+    /**
      * Sync data with Firebase
      */
     public function sync_data() {

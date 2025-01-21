@@ -1,4 +1,45 @@
 jQuery(document).ready(function($) {
+    // Handle Firebase test connection
+    $('#wsl_test_firebase').on('click', function() {
+        var $button = $(this);
+        var $result = $('#wsl_firebase_test_result');
+        var credentials = $('#wsl_firebase_credentials').val();
+
+        // Disable button and show testing message
+        $button.prop('disabled', true);
+        $result.html(wslAdmin.testingConnection)
+               .removeClass('notice-error notice-success')
+               .show();
+
+        // Make AJAX request
+        $.ajax({
+            url: wslAdmin.ajaxurl,
+            method: 'POST',
+            data: {
+                action: 'wsl_test_firebase',
+                nonce: wslAdmin.nonce,
+                credentials: credentials
+            },
+            success: function(response) {
+                if (response.success) {
+                    $result.html(wslAdmin.connectionSuccess)
+                           .addClass('notice-success');
+                } else {
+                    $result.html(wslAdmin.connectionFailed + response.data)
+                           .addClass('notice-error');
+                }
+            },
+            error: function() {
+                $result.html(wslAdmin.connectionFailed + 'AJAX request failed')
+                       .addClass('notice-error');
+            },
+            complete: function() {
+                $button.prop('disabled', false);
+            }
+        });
+    });
+});
+jQuery(document).ready(function($) {
     // Save post using REST API
     function savePost() {
         return new Promise((resolve, reject) => {
