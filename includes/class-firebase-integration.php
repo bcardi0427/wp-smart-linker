@@ -198,13 +198,25 @@ class Firebase_Integration {
 
         // Build Firestore REST API URL
         $project_id = $this->credentials['project_id'];
-        $base_url = "https://firestore.googleapis.com/v1/projects/{$project_id}/databases/(default)/documents";
-        
-        if ($doc_id) {
-            $url = "{$base_url}/{$collection}/{$doc_id}";
+        $base_url = "https://firestore.googleapis.com/v1";
+        $parent = "projects/{$project_id}/databases/(default)/documents";
+
+        if ($method === 'POST') {
+            // For creating documents with auto-generated ID
+            $url = "{$base_url}/{$parent}/{$collection}";
+            if ($doc_id) {
+                $url .= "?documentId={$doc_id}";
+            }
         } else {
-            $url = "{$base_url}/{$collection}";
+            // For other operations (GET, PUT, DELETE)
+            if ($doc_id) {
+                $url = "{$base_url}/{$parent}/{$collection}/{$doc_id}";
+            } else {
+                $url = "{$base_url}/{$parent}/{$collection}";
+            }
         }
+
+        error_log("WSL Debug - Document parent: {$parent}");
 
         $args = [
            'method' => $method,
@@ -475,17 +487,26 @@ class Firebase_Integration {
             // This will throw an exception if it fails
             $result = $this->make_request('wsl_connection_tests', 'POST', $test_data, $test_id);
             
-            // If we get here, the connection worked. Clean up the test document
-            if ($result) {
+            // If we get here, we successfully created the document
+            $created_doc = $result;
+            
+            // Verify the document has our test data
+            if (isset($created_doc['fields']) &&
+                isset($created_doc['fields']['timestamp']) &&
+                isset($created_doc['fields']['test'])) {
+                
+                // Clean up the test document
                 $this->make_request('wsl_connection_tests', 'DELETE', null, $test_id);
+                
+                // Restore original credentials
+                $this->credentials = $current_creds;
+                $this->jwt_token = null;
+                $this->token_expires = null;
+
+                return true;
             }
             
-            // Restore original credentials
-            $this->credentials = $current_creds;
-            $this->jwt_token = null;
-            $this->token_expires = null;
-
-            return true;
+            throw new \Exception('Invalid response format from Firestore');
 
         } catch (\Exception $e) {
             // Restore original credentials
