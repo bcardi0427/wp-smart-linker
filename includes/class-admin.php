@@ -84,6 +84,23 @@ class Admin {
             'wp-smart-linker',
             'wsl_main_section'
         );
+
+       // Add Firebase section
+       add_settings_section(
+           'wsl_firebase_section',
+           __('Firebase Configuration', 'wp-smart-linker'),
+           [$this, 'render_firebase_section_description'],
+           'wp-smart-linker'
+       );
+
+       // Add Firebase credentials field
+       add_settings_field(
+           'firebase_credentials',
+           __('Firebase Service Account JSON', 'wp-smart-linker'),
+           [$this, 'render_firebase_credentials_field'],
+           'wp-smart-linker',
+           'wsl_firebase_section'
+       );
     }
 
     /**
@@ -283,6 +300,46 @@ class Admin {
    }
 
    /**
+    * Render Firebase section description
+    */
+   public function render_firebase_section_description() {
+       echo '<p>' . esc_html__('Configure Firebase integration for improved performance with large sites. This enables caching and faster link suggestions.', 'wp-smart-linker') . '</p>';
+   }
+
+   /**
+    * Render Firebase credentials field
+    */
+   public function render_firebase_credentials_field() {
+       $options = get_option('wsl_settings');
+       $has_credentials = !empty($options['firebase_credentials']);
+       ?>
+       <div class="firebase-credentials-section">
+           <?php if ($has_credentials): ?>
+               <div class="notice notice-success inline">
+                   <p><?php _e('Firebase credentials are configured.', 'wp-smart-linker'); ?></p>
+               </div>
+           <?php endif; ?>
+           
+           <textarea
+               id="wsl_firebase_credentials"
+               name="wsl_settings[firebase_credentials]"
+               class="large-text code"
+               rows="10"
+               placeholder="<?php echo esc_attr__('Paste your Firebase service account JSON here', 'wp-smart-linker'); ?>"
+           ><?php echo esc_textarea($options['firebase_credentials'] ?? ''); ?></textarea>
+           
+           <p class="description">
+               <?php _e('Paste the contents of your Firebase service account JSON file. Get this from Firebase Console > Project Settings > Service Accounts > Generate New Private Key.', 'wp-smart-linker'); ?>
+               <br>
+               <a href="https://console.firebase.google.com/project/_/settings/serviceaccounts/adminsdk" target="_blank">
+                   <?php _e('Open Firebase Console →', 'wp-smart-linker'); ?>
+               </a>
+           </p>
+       </div>
+       <?php
+   }
+
+   /**
     * Sanitize settings
      *
      * @param array $input The submitted settings
@@ -331,6 +388,38 @@ class Admin {
             $sanitized['excluded_post_types'] = array_map('sanitize_text_field', $input['excluded_post_types']);
         } else {
             $sanitized['excluded_post_types'] = ['attachment'];
+        }
+
+        // Firebase Credentials
+        if (isset($input['firebase_credentials'])) {
+            $credentials = trim($input['firebase_credentials']);
+            if (!empty($credentials)) {
+                // Attempt to parse and validate JSON
+                $json_data = json_decode($credentials, true);
+                if (json_last_error() !== JSON_ERROR_NONE) {
+                    add_settings_error(
+                        'wsl_settings',
+                        'invalid_firebase_json',
+                        __('Invalid Firebase credentials JSON format', 'wp-smart-linker')
+                    );
+                } else {
+                    // Validate required fields
+                    $required_fields = ['type', 'project_id', 'private_key', 'client_email'];
+                    $missing_fields = array_filter($required_fields, function($field) use ($json_data) {
+                        return empty($json_data[$field]);
+                    });
+
+                    if (!empty($missing_fields)) {
+                        add_settings_error(
+                            'wsl_settings',
+                            'missing_firebase_fields',
+                            __('Firebase credentials JSON is missing required fields', 'wp-smart-linker')
+                        );
+                    } else {
+                        $sanitized['firebase_credentials'] = $credentials;
+                    }
+                }
+            }
         }
         
         return $sanitized;
