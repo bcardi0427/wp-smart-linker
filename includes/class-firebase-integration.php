@@ -375,16 +375,20 @@ class Firebase_Integration {
             // Clear any existing token
             $this->jwt_token = null;
             $this->token_expires = null;
+// Try to write to a test location
+$test_data = ['timestamp' => time(), 'test' => true];
+$result = $this->make_request('wsl_connection_test', 'PUT', $test_data);
 
-            // Try to make a test request
-            $result = $this->make_request('test', 'GET');
-            
-            // Restore original credentials
-            $this->credentials = $current_creds;
-            $this->database_url = $current_db_url;
-            $this->jwt_token = null;
-            $this->token_expires = null;
+// Clean up test data
+$this->make_request('wsl_connection_test', 'DELETE');
 
+// Restore original credentials
+$this->credentials = $current_creds;
+$this->database_url = $current_db_url;
+$this->jwt_token = null;
+$this->token_expires = null;
+
+return isset($result['timestamp']);
             return true;
 
         } catch (\Exception $e) {
