@@ -197,7 +197,11 @@ class Firebase_Integration {
         }
 
         // Build Firestore REST API URL
+        if (empty($this->credentials['project_id'])) {
+            throw new \Exception('Invalid Firebase credentials: Missing project_id');
+        }
         $project_id = $this->credentials['project_id'];
+        error_log("WSL Debug - Using project ID: {$project_id}");
         $base_url = "https://firestore.googleapis.com/v1";
         $parent = "projects/{$project_id}/databases/(default)/documents";
 
@@ -469,6 +473,12 @@ class Firebase_Integration {
             if (json_last_error() !== JSON_ERROR_NONE) {
                 throw new \Exception('Invalid JSON format');
             }
+
+            // Log credential info (without sensitive data)
+            error_log("WSL Debug - Testing Firebase connection with:");
+            error_log("WSL Debug - Project ID: " . ($temp_creds['project_id'] ?? 'missing'));
+            error_log("WSL Debug - Service Account: " . ($temp_creds['client_email'] ?? 'missing'));
+            error_log("WSL Debug - Auth Type: " . ($temp_creds['type'] ?? 'missing'));
 
             // Store current credentials
             $current_creds = $this->credentials;
