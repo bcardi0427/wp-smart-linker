@@ -205,14 +205,22 @@ class Firebase_Integration {
         $base_url = "https://firestore.googleapis.com/v1";
         $parent = "projects/{$project_id}/databases/(default)/documents";
 
-        if ($method === 'POST') {
-            // For creating documents with auto-generated ID
+        // Adjust PUT requests to use POST for document creation
+        if ($method === 'PUT') {
+            $method = 'PATCH';
+            if ($doc_id) {
+                $url = "{$base_url}/{$parent}/{$collection}/{$doc_id}";
+                error_log("WSL Debug - Using PATCH for document update: $url");
+            } else {
+                throw new \Exception('Document ID required for PUT/PATCH operations');
+            }
+        } else if ($method === 'POST') {
             $url = "{$base_url}/{$parent}/{$collection}";
             if ($doc_id) {
                 $url .= "?documentId={$doc_id}";
             }
+            error_log("WSL Debug - Using POST for document creation: $url");
         } else {
-            // For other operations (GET, PUT, DELETE)
             if ($doc_id) {
                 $url = "{$base_url}/{$parent}/{$collection}/{$doc_id}";
             } else {
@@ -247,7 +255,13 @@ class Firebase_Integration {
 
         if (is_wp_error($response)) {
             $error_message = $response->get_error_message();
-            error_log("WSL Firebase Error: $error_message");
+            error_log("WSL Firebase Error:");
+            error_log("- Request URL: $url");
+            error_log("- Method: $method");
+            error_log("- Error: $error_message");
+            if ($data !== null) {
+                error_log("- Request Data: " . json_encode(array_keys($data))); // Log just the keys for privacy
+            }
             throw new \Exception('Firebase request failed: ' . $error_message);
         }
 
@@ -257,8 +271,74 @@ class Firebase_Integration {
         error_log("WSL Debug - Firebase response code: $response_code");
         error_log("WSL Debug - Firebase response body: $response_body");
 
+        // Handle different response codes
         if ($response_code !== 200) {
-            throw new \Exception('Firebase error: ' . $response_body);
+            $error_message = '';
+            
+            // Try to parse error message from response body if it's JSON
+            $parsed_body = json_decode($response_body, true);
+            if (json_last_error() === JSON_ERROR_NONE && isset($parsed_body['error']['message'])) {
+                $error_message = $parsed_body['error']['message'];
+            } else {
+                $error_message = $response_body;
+            }
+
+            // Special handling for 404 errors
+            if ($response_code === 404) {
+                if (strpos($url, '/documents/posts/') !== false) {
+                    // Document not found in posts collection, but that's okay for new posts
+                    if ($method === 'PUT' || $method === 'POST') {
+                        error_log("WSL: Creating new document in posts collection");
+                    } else {
+                        throw new \Exception("Document not found: $url");
+                    }
+                } else {
+                    throw new \Exception("Resource not found: $url");
+                }
+            }
+            // Handle other error codes
+            else if ($response_code !== 200) {
+                error_log("WSL Firebase HTTP Error:");
+                error_log("- Status Code: $response_code");
+                error_log("- Request URL: $url");
+                error_log("- Method: $method");
+                if ($data !== null) {
+                    error_log("- Request Data Keys: " . json_encode(array_keys($data)));
+                }
+                error_log("- Response Body: $response_body");
+                
+                switch ($response_code) {
+                    case 401:
+                        error_log("- Detail: Authentication token may be expired or invalid");
+                        throw new \Exception("Authentication failed. Please check Firebase credentials and ensure system time is accurate.");
+                    case 403:
+                        error_log("- Detail: Service account may lack required permissions");
+                        throw new \Exception("Access forbidden. Please verify Firebase service account permissions and project settings.");
+                    case 400:
+                        if (strpos($error_message, 'Document parent') !== false) {
+                            error_log("WSL: Attempting to create parent collection");
+                            // Let the operation continue as this might be the first write
+                        } else {
+                            error_log("- Detail: Request validation failed");
+                            throw new \Exception("Invalid request format or data: $error_message");
+                        }
+                        break;
+                    case 404:
+                        error_log("- Detail: Resource or collection not found");
+                        throw new \Exception("Resource not found: Please verify collection and document paths");
+                    case 429:
+                        error_log("- Detail: Too many requests");
+                        throw new \Exception("Rate limit exceeded. Please reduce request frequency or increase quotas.");
+                    case 500:
+                    case 502:
+                    case 503:
+                        error_log("- Detail: Firebase service disruption");
+                        throw new \Exception("Firebase service error (HTTP $response_code). Please retry after a brief delay.");
+                    default:
+                        error_log("- Detail: Unexpected response code");
+                        throw new \Exception("Firebase error (HTTP $response_code): $error_message");
+                }
+            }
         }
 
         return json_decode($response_body, true);
@@ -352,13 +432,49 @@ class Firebase_Integration {
      *
      * @param int $post_id Post ID
      * @param array $data Post data
+     * @return bool Whether the operation was successful
      */
     public function store_post_data($post_id, $data) {
         try {
-            $this->make_request("posts/$post_id", 'PUT', $data);
-            error_log("WSL: Successfully stored post $post_id data in Firebase");
+            // Verify post exists and is published
+            $post = get_post($post_id);
+            if (!$post || $post->post_status !== 'publish') {
+                error_log("WSL: Skipping post $post_id - post does not exist or is not published");
+                return false;
+            }
+
+            // Validate required data fields
+            $required_fields = ['title', 'content', 'modified'];
+            foreach ($required_fields as $field) {
+                if (empty($data[$field])) {
+                    error_log("WSL: Missing required field '$field' for post $post_id");
+                    return false;
+                }
+            }
+
+            try {
+                // First try to get the document
+                $existing = $this->make_request("posts/$post_id", 'GET');
+                if ($existing) {
+                    // Document exists, update it
+                    $this->make_request("posts/$post_id", 'PATCH', $data);
+                    error_log("WSL: Updated existing post $post_id in Firebase");
+                }
+            } catch (\Exception $e) {
+                if (strpos($e->getMessage(), 'not found') !== false) {
+                    // Document doesn't exist, create it
+                    $this->make_request("posts", 'POST', $data, $post_id);
+                    error_log("WSL: Created new post $post_id in Firebase");
+                } else {
+                    // Some other error occurred
+                    throw $e;
+                }
+            }
+            return true;
+
         } catch (\Exception $e) {
-            error_log('WSL Firebase Error: ' . $e->getMessage());
+            error_log("WSL Firebase Error storing post $post_id: " . $e->getMessage());
+            return false;
         }
     }
 
@@ -532,28 +648,206 @@ class Firebase_Integration {
     }
 
     /**
+     * Ensure Firestore database exists
+     */
+    private function ensure_database_exists() {
+        try {
+            $project_id = $this->credentials['project_id'];
+            $url = "https://firestore.googleapis.com/v1/projects/{$project_id}/databases/(default)";
+            
+            $args = [
+                'method' => 'GET',
+                'headers' => [
+                    'Authorization' => 'Bearer ' . $this->jwt_token
+                ],
+                'timeout' => 30,
+            ];
+
+            $response = wp_remote_request($url, $args);
+            $response_code = wp_remote_retrieve_response_code($response);
+
+            if ($response_code === 404) {
+                // Database doesn't exist, create it
+                error_log("WSL: Creating Firestore database for project {$project_id}");
+                
+                $create_args = [
+                    'method' => 'POST',
+                    'headers' => [
+                        'Content-Type' => 'application/json',
+                        'Authorization' => 'Bearer ' . $this->jwt_token
+                    ],
+                    'body' => json_encode([
+                        'type' => 'FIRESTORE_NATIVE'
+                    ]),
+                    'timeout' => 30,
+                ];
+
+                $create_response = wp_remote_request(
+                    "https://firestore.googleapis.com/v1/projects/{$project_id}/databases?databaseId=(default)",
+                    $create_args
+                );
+
+                if (is_wp_error($create_response)) {
+                    throw new \Exception('Failed to create Firestore database: ' . $create_response->get_error_message());
+                }
+
+                $create_code = wp_remote_retrieve_response_code($create_response);
+                if ($create_code !== 200 && $create_code !== 409) { // 409 means database already exists
+                    throw new \Exception('Failed to create Firestore database. Response code: ' . $create_code);
+                }
+            } elseif (is_wp_error($response)) {
+                throw new \Exception('Failed to check database existence: ' . $response->get_error_message());
+            }
+
+            return true;
+        } catch (\Exception $e) {
+            error_log('WSL Firebase Error: ' . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
      * Sync data with Firebase
      */
+    /**
+     * Initialize required Firestore collections
+     */
+    private function init_collections() {
+        try {
+            // Initialize posts collection with a test document
+            $test_doc = [
+                'title' => 'Collection Initialization',
+                'content' => 'Initializing posts collection',
+                'created' => current_time('mysql')
+            ];
+            $this->make_request('posts', 'POST', $test_doc, '_init');
+            error_log('WSL: Successfully initialized posts collection');
+            
+            // Clean up initialization document
+            $this->make_request('posts/_init', 'DELETE');
+            return true;
+        } catch (\Exception $e) {
+            error_log('WSL Firebase Error initializing collections: ' . $e->getMessage());
+            return false;
+        }
+    }
+
     public function sync_data() {
-        if (!$this->is_configured()) {
-            error_log('WSL: Firebase not configured, skipping sync');
-            return;
+        try {
+            if (!$this->is_configured()) {
+                throw new \Exception('Firebase not configured');
+            }
+
+            error_log('WSL: Starting Firebase sync');
+
+            // Initialize collections if needed
+            if (!$this->init_collections()) {
+                throw new \Exception('Failed to initialize Firestore collections');
+            }
+
+            // Get all published posts
+            $posts = get_posts([
+                'post_type' => ['post', 'page'],
+                'post_status' => 'publish',
+                'posts_per_page' => -1,
+                'orderby' => 'ID',
+                'order' => 'ASC'
+            ]);
+
+            if (empty($posts)) {
+                error_log('WSL: No published posts found to sync');
+                return true;
+            }
+
+            $sync_count = 0;
+            $error_count = 0;
+            $total_posts = count($posts);
+
+            error_log("WSL: Found {$total_posts} posts to sync");
+
+            foreach ($posts as $post) {
+                try {
+                    // Get fresh post data to ensure it's still published
+                    $current_post = get_post($post->ID);
+                    if (!$current_post || $current_post->post_status !== 'publish') {
+                        error_log("WSL: Skipping post {$post->ID} - not published or deleted");
+                        continue;
+                    }
+
+                    // Prepare post data
+                    $post_data = [
+                        'title' => $current_post->post_title,
+                        'content' => $current_post->post_content,
+                        'excerpt' => get_the_excerpt($current_post),
+                        'modified' => $current_post->post_modified,
+                        'categories' => wp_get_post_categories($post->ID, ['fields' => 'names']),
+                        'status' => $current_post->post_status,
+                        'type' => $current_post->post_type,
+                        'last_synced' => current_time('mysql')
+                    ];
+
+                    try {
+                        // Try to update existing document first
+                        $this->make_request("posts/{$post->ID}", 'PATCH', $post_data);
+                    } catch (\Exception $e) {
+                        if (strpos($e->getMessage(), 'not found') !== false) {
+                            // Document doesn't exist, create it
+                            $this->make_request('posts', 'POST', $post_data, $post->ID);
+                        } else {
+                            throw $e;
+                        }
+                    }
+                    $sync_count++;
+                    
+                    if ($sync_count % 10 === 0) {
+                        error_log("WSL: Progress - synced {$sync_count} of {$total_posts} posts");
+                    }
+
+                } catch (\Exception $e) {
+                    $error_message = $e->getMessage();
+                    error_log("WSL Firebase Error syncing post {$post->ID}:");
+                    error_log("- Title: " . $current_post->post_title);
+                    error_log("- Error: " . $error_message);
+                    error_log("- Type: " . $current_post->post_type);
+                    error_log("- Modified: " . $current_post->post_modified);
+                    
+                    // Try to identify specific error conditions
+                    if (strpos($error_message, 'Invalid request') !== false) {
+                        error_log("- Likely cause: Malformed data in post content");
+                    } else if (strpos($error_message, 'Permission denied') !== false) {
+                        error_log("- Likely cause: Firebase permissions issue");
+                    }
+                    
+                    $error_count++;
+                    
+                    // Optional: Add retry logic for certain error types
+                    if (strpos($error_message, 'timeout') !== false ||
+                        strpos($error_message, 'network') !== false) {
+                        error_log("- Attempting retry for network-related error");
+                        try {
+                            sleep(2); // Brief delay before retry
+                            $this->make_request("posts/{$post->ID}", 'PATCH', $post_data);
+                            error_log("- Retry successful for post {$post->ID}");
+                            $error_count--; // Decrement error count on successful retry
+                            $sync_count++;
+                            continue;
+                        } catch (\Exception $retry_e) {
+                            error_log("- Retry failed: " . $retry_e->getMessage());
+                        }
+                    }
+                }
+            }
+
+            $success = $error_count === 0;
+            $status = $success ? "Successfully" : "Partially";
+            error_log("WSL: Firebase sync {$status} completed. Synced: {$sync_count}, Errors: {$error_count}, Total: {$total_posts}");
+            
+            return $success;
+
+        } catch (\Exception $e) {
+            error_log('WSL Firebase Error during sync: ' . $e->getMessage());
+            return false;
         }
-
-        error_log('WSL: Starting Firebase sync');
-
-        // Get all published posts
-        $posts = get_posts([
-            'post_type' => ['post', 'page'],
-            'post_status' => 'publish',
-            'posts_per_page' => -1
-        ]);
-
-        foreach ($posts as $post) {
-            $this->handle_post_update($post->ID, $post, true);
-        }
-
-        error_log('WSL: Firebase sync completed');
     }
 
     /**

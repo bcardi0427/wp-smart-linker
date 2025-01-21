@@ -61,25 +61,37 @@ class Content_Processor {
 
         $sections = [];
         
-        // Check if content is from Gutenberg
-        error_log('WSL Debug - Processing content type: ' . (has_blocks($content) ? 'Gutenberg' : 'Classic'));
+        error_log('WSL Debug - Starting content analysis');
+        error_log('WSL Debug - Content length: ' . strlen($content));
 
-        if (has_blocks($content)) {
-            $blocks = parse_blocks($content);
-            error_log('WSL Debug - Found ' . count($blocks) . ' blocks');
-            $this->process_blocks($blocks, $sections);
+        try {
+            // Check if content is from Gutenberg
+            $is_gutenberg = has_blocks($content);
+            error_log('WSL Debug - Content type: ' . ($is_gutenberg ? 'Gutenberg' : 'Classic'));
+
+            if ($is_gutenberg) {
+                $blocks = parse_blocks($content);
+                error_log('WSL Debug - Found ' . count($blocks) . ' blocks');
+                error_log('WSL Debug - Block types: ' . implode(', ', array_filter(array_column($blocks, 'blockName'))));
+                $this->process_blocks($blocks, $sections);
+            }
+
+            // Always try legacy processing as fallback
+            error_log('WSL Debug - Starting legacy DOM processing');
+            $dom = new \DOMDocument();
+            @$dom->loadHTML(mb_convert_encoding($content, 'HTML-ENTITIES', 'UTF-8'), LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+            $xpath = new \DOMXPath($dom);
+            
+            // Query for all text blocks
+            $elements = $xpath->query('//p|//div[not(descendant::p)]');
+            error_log('WSL Debug - Found ' . $elements->length . ' DOM elements');
+            
+            $this->process_elements($elements, $sections);
+        } catch (\Exception $e) {
+            error_log('WSL Error in content analysis: ' . $e->getMessage());
+            error_log('WSL Error trace: ' . $e->getTraceAsString());
+            throw $e;
         }
-
-        // Always try legacy processing as fallback
-        // This helps catch content that might be missed by block parsing
-        $dom = new \DOMDocument();
-        @$dom->loadHTML(mb_convert_encoding($content, 'HTML-ENTITIES', 'UTF-8'), LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
-        $xpath = new \DOMXPath($dom);
-        
-        // Query for all text blocks
-        $elements = $xpath->query('//p|//div[not(descendant::p)]');
-        
-        $this->process_elements($elements, $sections);
 
         error_log('WSL Debug - Content processing complete. Found ' . count($sections) . ' total sections');
 

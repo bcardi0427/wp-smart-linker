@@ -55,10 +55,14 @@ function wsl_init() {
     global $wsl_instances;
     
     // Initialize core classes in dependency order
+    $wsl_instances['firebase'] = new WSL\Firebase_Integration();
     $wsl_instances['openai'] = new WSL\OpenAI_Integration();
     $wsl_instances['content_processor'] = new WSL\Content_Processor();
     $wsl_instances['link_manager'] = new WSL\Link_Manager();
     $wsl_instances['admin'] = new WSL\Admin();
+
+    // Register deactivation hook for Firebase cleanup
+    register_deactivation_hook(__FILE__, [WSL\Firebase_Integration::class, 'deactivate']);
 }
 add_action('plugins_loaded', 'wsl_init');
 

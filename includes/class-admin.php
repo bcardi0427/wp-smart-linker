@@ -505,34 +505,34 @@ class Admin {
         } catch (\Exception $e) {
             wp_send_json_error($e->getMessage());
         }
-    
-        /**
-         * Handle Firebase sync AJAX request
-         */
-        public function handle_firebase_sync() {
-            check_ajax_referer('wsl_firebase_test', 'nonce');
-    
-            if (!current_user_can('manage_options')) {
-                wp_send_json_error(__('Unauthorized', 'wp-smart-linker'));
+    }
+
+    /**
+     * Handle Firebase sync AJAX request
+     */
+    public function handle_firebase_sync() {
+        check_ajax_referer('wsl_firebase_test', 'nonce');
+
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(__('Unauthorized', 'wp-smart-linker'));
+        }
+
+        try {
+            if (!$this->firebase || !$this->firebase->is_configured()) {
+                throw new \Exception(__('Firebase is not properly configured', 'wp-smart-linker'));
             }
-    
-            try {
-                if (!$this->firebase || !$this->firebase->is_configured()) {
-                    throw new \Exception(__('Firebase is not properly configured', 'wp-smart-linker'));
-                }
-    
-                // Start the sync process
-                $result = $this->firebase->sync_data();
-                
-                if ($result === false) {
-                    throw new \Exception(__('Sync process failed', 'wp-smart-linker'));
-                }
-    
-                wp_send_json_success(__('All posts have been synced to Firebase', 'wp-smart-linker'));
-    
-            } catch (\Exception $e) {
-                wp_send_json_error($e->getMessage());
+
+            // Start the sync process
+            $result = $this->firebase->sync_data();
+            
+            if ($result === false) {
+                throw new \Exception(__('Sync process failed', 'wp-smart-linker'));
             }
+
+            wp_send_json_success(__('All posts have been synced to Firebase', 'wp-smart-linker'));
+
+        } catch (\Exception $e) {
+            wp_send_json_error($e->getMessage());
         }
     }
 }
