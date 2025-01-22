@@ -31,9 +31,48 @@ WP Smart Linker enhances your WordPress site's SEO and user experience by automa
 = AI Provider Details =
 
 **OpenAI Models:**
-* GPT-3.5 Turbo
-* GPT-4
-* GPT-4 Turbo
+* GPT-3.5 Series:
+  * GPT-3.5 Turbo
+  * GPT-3.5 Turbo 0125
+  * GPT-3.5 Turbo 1106
+  * GPT-3.5 Turbo 16k
+  * GPT-3.5 Turbo 16k 0613
+  * GPT-3.5 Turbo Instruct
+  * GPT-3.5 Turbo Instruct 0914
+
+* GPT-4 Series:
+  * GPT-4
+  * GPT-4 0125 Preview
+  * GPT-4 0613
+  * GPT-4 1106 Preview
+  * GPT-4 Turbo
+  * GPT-4 Turbo 2024-04-09
+  * GPT-4 Turbo Preview
+
+* GPT-4 Optimized (4o) Series:
+  * GPT-4o
+  * GPT-4o 2024-05-13
+  * GPT-4o 2024-08-06
+  * GPT-4o 2024-11-20
+  
+* Audio Preview Models:
+  * GPT-4o Audio Preview
+  * GPT-4o Audio Preview 2024-10-01
+  * GPT-4o Audio Preview 2024-12-17
+  
+* Mini Series:
+  * GPT-4o Mini
+  * GPT-4o Mini 2024-07-18
+  * GPT-4o Mini Audio Preview
+  * GPT-4o Mini Audio Preview 2024-10-01
+  * GPT-4o Mini Audio Preview 2024-12-17
+  
+* Realtime Preview Models:
+  * GPT-4o Mini Realtime Preview
+  * GPT-4o Mini Realtime Preview 2024-12-17
+  * GPT-4o Realtime Preview
+  * GPT-4o Realtime Preview 2024-10-01
+  * GPT-4o Realtime Preview 2024-12-17
 
 **DeepSeek Models:**
 * DeepSeek V3 Chat
