@@ -1,9 +1,10 @@
 <?php
 /**
  * Plugin Name: WP Smart Linker
- * Description: Intelligent internal linking plugin using OpenAI and WordPress HTML Tag Processor
- * Version: 1.0.0
- * Author: Your Name
+ * Description: AI-powered internal linking suggestions using multiple AI providers
+ * Version: 1.1.0
+ * Author: Gerald Haygood
+ * Plugin URI: https://github.com/bcardi0427/wp-smart-linker
  * Text Domain: wp-smart-linker
  */
 
@@ -15,7 +16,7 @@ if (!defined('ABSPATH')) {
 // Define plugin constants
 define('WSL_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('WSL_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('WSL_VERSION', '1.0.0');
+define('WSL_VERSION', '1.1.0');
 
 // Autoloader for plugin classes
 spl_autoload_register(function ($class_name) {
