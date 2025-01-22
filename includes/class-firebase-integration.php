@@ -555,14 +555,23 @@ class Firebase_Integration {
         $excluded_types = $settings['excluded_post_types'] ?? ['attachment'];
         if (in_array($post->post_type, $excluded_types)) return;
 
-        // Store post data
-        $this->store_post_data($post_id, [
+        // Prepare base post data
+        $post_data = [
             'title' => $post->post_title,
             'content' => $post->post_content,
             'excerpt' => get_the_excerpt($post),
             'modified' => $post->post_modified,
-            'categories' => wp_get_post_categories($post_id, ['fields' => 'names'])
-        ]);
+            'type' => $post->post_type,
+            'status' => $post->post_status
+        ];
+
+        // Add categories only for posts, not pages
+        if ($post->post_type === 'post') {
+            $post_data['categories'] = wp_get_post_categories($post_id, ['fields' => 'names']);
+        }
+
+        // Store post data
+        $this->store_post_data($post_id, $post_data);
     }
 
     /**
@@ -775,16 +784,21 @@ class Firebase_Integration {
                     }
 
                     // Prepare post data
+                    // Prepare base post data
                     $post_data = [
                         'title' => $current_post->post_title,
                         'content' => $current_post->post_content,
                         'excerpt' => get_the_excerpt($current_post),
                         'modified' => $current_post->post_modified,
-                        'categories' => wp_get_post_categories($post->ID, ['fields' => 'names']),
                         'status' => $current_post->post_status,
                         'type' => $current_post->post_type,
                         'last_synced' => current_time('mysql')
                     ];
+
+                    // Add categories only for posts, not pages
+                    if ($current_post->post_type === 'post') {
+                        $post_data['categories'] = wp_get_post_categories($post->ID, ['fields' => 'names']);
+                    }
 
                     try {
                         // Try to update existing document first

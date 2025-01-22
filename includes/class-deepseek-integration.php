@@ -1,173 +1,46 @@
 <?php
 namespace WSL;
 
-class OpenAI_Integration extends AI_Integration_Base {
-    private $api_endpoint = 'https://api.openai.com/v1/chat/completions';
-    private $models_endpoint = 'https://api.openai.com/v1/models';
-    private $valid_models = null;
+class DeepSeek_Integration extends AI_Integration_Base {
+    private $api_endpoint = 'https://api.deepseek.com/v1/chat/completions';
+    private $valid_models = [
+        'deepseek-chat' => 'DeepSeek Chat',
+        'deepseek-coder' => 'DeepSeek Coder',
+    ];
 
     /**
      * Set up API credentials from settings
      */
     protected function setup_credentials() {
         $settings = get_option('wsl_settings');
-        $this->api_key = $settings['openai_api_key'] ?? '';
-        $this->model = $settings['openai_model'] ?? 'gpt-3.5-turbo';
-
-        // If no API key, use default model
-        if (empty($this->api_key)) {
-            $this->model = 'gpt-3.5-turbo';
-            return;
-        }
-
-        // Validate model if API key exists
-        if (!$this->is_valid_model($this->model)) {
-            error_log('WSL Warning: Invalid model selected, falling back to gpt-3.5-turbo');
-            $this->model = 'gpt-3.5-turbo';
-        }
-    }
-
-    /**
-     * Get available models from OpenAI API
-     *
-     * @return array List of valid model IDs
-     */
-    private function fetch_valid_models() {
-        if ($this->valid_models !== null) {
-            return $this->valid_models;
-        }
-
-        // Early return with default models if no API key is set
-        if (empty($this->api_key)) {
-            return [
-                'gpt-3.5-turbo' => true,
-                'gpt-4' => true,
-                'gpt-4-turbo' => true
-            ];
-        }
-
-        try {
-            $response = wp_remote_post($this->models_endpoint, [
-                'headers' => [
-                    'Authorization' => 'Bearer ' . $this->api_key,
-                    'Content-Type' => 'application/json'
-                ],
-                'timeout' => 30
-            ]);
-
-            if (is_wp_error($response)) {
-                throw new AI_Exception(
-                    'Failed to fetch models: ' . $response->get_error_message(),
-                    AI_Exception::ERROR_API_ERROR
-                );
-            }
-
-            $response_code = wp_remote_retrieve_response_code($response);
-            $response_body = wp_remote_retrieve_body($response);
-
-            if ($response_code !== 200) {
-                throw new AI_Exception(
-                    'Failed to fetch models: ' . $response_body,
-                    AI_Exception::ERROR_API_ERROR
-                );
-            }
-
-            $data = json_decode($response_body, true);
-            if (!isset($data['data']) || !is_array($data['data'])) {
-                throw new AI_Exception(
-                    'Invalid models response format',
-                    AI_Exception::ERROR_INVALID_RESPONSE
-                );
-            }
-
-            // Filter models based on availability and type
-            $this->valid_models = [];
-            foreach ($data['data'] as $model) {
-                if (isset($model['id'])) {
-                    $id = $model['id'];
-                    // Include GPT models and their variants
-                    if (strpos($id, 'gpt') !== false || 
-                        strpos($id, 'ft:gpt') !== false || 
-                        strpos($id, 'text-davinci') !== false) {
-                        $this->valid_models[$id] = true;
-                    }
-                }
-            }
-
-            // Cache the models list for 24 hours
-            set_transient('wsl_openai_models', $this->valid_models, DAY_IN_SECONDS);
-
-            return $this->valid_models;
-
-        } catch (Exception $e) {
-            error_log('WSL Error fetching models: ' . $e->getMessage());
-            return [
-                'gpt-3.5-turbo' => true,
-                'gpt-4' => true,
-                'gpt-4-turbo' => true
-            ];
-        }
+        $this->api_key = $settings['deepseek_api_key'] ?? '';
+        $this->model = $settings['deepseek_model'] ?? 'deepseek-chat';
     }
 
     /**
      * Validate if a model ID is valid
+     *
+     * @param string $model_id Model ID to check
+     * @return bool Whether the model is valid
      */
     public function is_valid_model($model_id) {
-        // Try to get cached models first
-        $cached_models = get_transient('wsl_openai_models');
-        if ($cached_models !== false) {
-            return isset($cached_models[$model_id]);
-        }
-
-        // Fetch fresh list if no cache
-        $models = $this->fetch_valid_models();
-        return isset($models[$model_id]);
+        return isset($this->valid_models[$model_id]);
     }
 
     /**
      * Get list of available models
+     *
+     * @return array Array of model ID => display name pairs
      */
     public function get_available_models() {
-        // Return default models if no API key is set
-        if (empty($this->api_key)) {
-            return [
-                'gpt-3.5-turbo' => 'GPT-3.5 Turbo',
-                'gpt-4' => 'GPT-4',
-                'gpt-4-turbo' => 'GPT-4 Turbo'
-            ];
-        }
-
-        // Try to get cached models first
-        $cached_models = get_transient('wsl_openai_models');
-        if ($cached_models !== false) {
-            $models = array_keys($cached_models);
-        } else {
-            // Fetch fresh list if no cache
-            $models = array_keys($this->fetch_valid_models());
-        }
-
-        // Create display names for models
-        $formatted_models = [];
-        foreach ($models as $model_id) {
-            // Clean up the model ID for display
-            $display_name = ucwords(str_replace(['-', '.'], [' ', ' '], $model_id));
-            
-            // Special cases for better readability
-            if (strpos($model_id, 'ft:') === 0) {
-                $display_name = 'Fine-tuned: ' . substr($display_name, 3);
-            }
-            
-            $formatted_models[$model_id] = $display_name;
-        }
-
-        // Sort models by display name
-        asort($formatted_models);
-
-        return $formatted_models;
+        return $this->valid_models;
     }
 
     /**
-     * Generate suggestions using the OpenAI API
+     * Generate suggestions using the DeepSeek API
+     *
+     * @param string $prompt The prompt to send to the AI
+     * @return array The AI response
      */
     protected function get_ai_suggestions($prompt) {
         // Try to get cached response first
@@ -188,13 +61,11 @@ class OpenAI_Integration extends AI_Integration_Base {
                     'content' => $prompt
                 ]
             ],
-            'temperature' => 0.8,
-            'max_tokens' => 1500,
-            'frequency_penalty' => 0.3,
-            'presence_penalty' => 0.3
+            'temperature' => 0.7,
+            'max_tokens' => 1500
         ];
 
-        error_log('WSL Debug - OpenAI Request: ' . print_r($request_body, true));
+        error_log('WSL Debug - DeepSeek Request: ' . print_r($request_body, true));
 
         $response = wp_remote_post($this->api_endpoint, [
             'headers' => [
@@ -215,6 +86,9 @@ class OpenAI_Integration extends AI_Integration_Base {
         $response_code = wp_remote_retrieve_response_code($response);
         $response_body = wp_remote_retrieve_body($response);
 
+        error_log('WSL Debug - DeepSeek Response Code: ' . $response_code);
+        error_log('WSL Debug - DeepSeek Response Body: ' . $response_body);
+
         if ($response_code !== 200) {
             $error_data = json_decode($response_body, true);
             $error_message = isset($error_data['error']['message'])
@@ -222,7 +96,7 @@ class OpenAI_Integration extends AI_Integration_Base {
                 : 'Unknown API error occurred';
                 
             throw new AI_Exception(
-                'OpenAI API Error: ' . $error_message,
+                'DeepSeek API Error: ' . $error_message,
                 AI_Exception::ERROR_API_ERROR
             );
         }
@@ -230,7 +104,7 @@ class OpenAI_Integration extends AI_Integration_Base {
         $body = json_decode($response_body, true);
         if (empty($body['choices'][0]['message']['content'])) {
             throw new AI_Exception(
-                'Invalid API response: No content returned from OpenAI',
+                'Invalid API response: No content returned from DeepSeek',
                 AI_Exception::ERROR_INVALID_RESPONSE
             );
         }
@@ -272,6 +146,10 @@ class OpenAI_Integration extends AI_Integration_Base {
 
     /**
      * Process and validate API response
+     *
+     * @param array $response Raw API response
+     * @param array $sections Original content sections
+     * @return array Processed suggestions
      */
     protected function process_ai_response($response, $sections) {
         if (!isset($response['suggestions']) || !is_array($response['suggestions'])) {
@@ -334,6 +212,10 @@ class OpenAI_Integration extends AI_Integration_Base {
 
     /**
      * Validate a single suggestion
+     *
+     * @param array $suggestion Suggestion to validate
+     * @param int $section_count Total number of sections
+     * @return bool Whether suggestion is valid
      */
     private function validate_suggestion($suggestion, $section_count) {
         // Check required fields

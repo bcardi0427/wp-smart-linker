@@ -197,6 +197,81 @@ jQuery(document).ready(function($) {
         });
     });
 
+    // Handle get suggestions button
+    $('.wsl-get-suggestions').on('click', function() {
+        const $button = $(this);
+        const $wrapper = $button.closest('.wsl-suggestions-wrapper');
+        const $spinner = $wrapper.find('.spinner');
+        const $list = $wrapper.find('.wsl-suggestions-list');
+        const postId = $('#post_ID').val();
+
+        // Show loading state
+        $button.prop('disabled', true);
+        $spinner.addClass('is-active');
+        $list.empty();
+
+        // Make AJAX request
+        $.ajax({
+            url: wslAdmin.ajaxurl,
+            method: 'POST',
+            data: {
+                action: 'wsl_get_suggestions',
+                post_id: postId,
+                nonce: wslAdmin.nonce
+            },
+            success: function(response) {
+                if (response.success) {
+                    displaySuggestions(response.data.suggestions, $list);
+                } else {
+                    $list.html('<div class="wsl-error">' + response.data + '</div>');
+                }
+            },
+            error: function() {
+                $list.html('<div class="wsl-error">Failed to get suggestions</div>');
+            },
+            complete: function() {
+                $button.prop('disabled', false);
+                $spinner.removeClass('is-active');
+            }
+        });
+    });
+
+    // Display suggestions in the meta box
+    function displaySuggestions(suggestions, $container) {
+        if (!suggestions || !suggestions.length) {
+            $container.html('<div class="wsl-message">No suggestions available</div>');
+            return;
+        }
+
+        const $list = $('<div class="wsl-suggestions-items"></div>');
+        suggestions.forEach(function(suggestion) {
+            const $item = $(
+                '<div class="wsl-suggestion-item">' +
+                    '<div class="wsl-suggestion-content">' +
+                        '<strong>Anchor Text:</strong> ' + suggestion.anchor_text +
+                        '<br><strong>Section:</strong> ' +
+                        suggestion.section_content.substring(0, 100) + '...' +
+                        '<br><strong>Score:</strong> ' +
+                        Math.round(suggestion.relevance_score * 100) + '%' +
+                    '</div>' +
+                    '<div class="wsl-suggestion-actions">' +
+                        '<button type="button" class="button button-small wsl-apply-suggestion">' +
+                            'Apply' +
+                        '</button>' +
+                    '</div>' +
+                '</div>'
+            );
+
+            // Store suggestion data
+            $item.find('.wsl-apply-suggestion').data('suggestion', suggestion);
+
+            $list.append($item);
+        });
+
+        $container.empty().append($list);
+        bindSuggestionHandlers();
+    }
+
     // Handle suggestion application
     function bindSuggestionHandlers() {
         $('.wsl-apply-suggestion').off('click').on('click', function(e) {
