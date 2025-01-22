@@ -1,6 +1,11 @@
+# WP Smart Linker
+
 === WP Smart Linker ===
-Contributors: geraldhaygood
+
+Contributors: Gerald Haygood
+
 Tags: ai, internal linking, seo, content optimization, openai, deepseek, gemini
+
 Requires at least: 6.0
 Tested up to: 6.4
 Stable tag: 1.1.0
@@ -10,11 +15,11 @@ License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
 AI-powered internal linking suggestions using multiple AI providers including OpenAI, DeepSeek, and Google's Gemini.
 
-== Description ==
+## Description
 
 WP Smart Linker enhances your WordPress site's SEO and user experience by automatically suggesting relevant internal links using advanced AI technology. Choose from multiple AI providers including OpenAI, DeepSeek, and Google's Gemini to get intelligent link suggestions based on your content.
 
-= Features =
+## Features
 
 * Multiple AI Provider Support:
   * OpenAI (GPT-3.5/4)
@@ -28,7 +33,7 @@ WP Smart Linker enhances your WordPress site's SEO and user experience by automa
 * Detailed model information and tooltips
 * Secure API key management
 
-= AI Provider Details =
+## AI Provider Details
 
 **OpenAI Models:**
 * GPT-3.5 Series:
@@ -87,9 +92,9 @@ WP Smart Linker enhances your WordPress site's SEO and user experience by automa
 * Text Embedding - For measuring text relatedness
 * AQA - Source-grounded question answering
 
-== Installation ==
+## Installation
 
-1. Upload the plugin files to `/wp-content/plugins/wp-smart-linker`, or install through WordPress's plugin installer
+1. Upload the plugin files to `/wp-content/plugins/wp-smart-linker`, or Download Zip file and install through WordPress's plugin installer
 2. Activate the plugin
 3. Go to Settings > Smart Linker
 4. Choose your preferred AI provider
@@ -97,25 +102,25 @@ WP Smart Linker enhances your WordPress site's SEO and user experience by automa
 6. Configure additional settings like threshold and post types
 7. Optional: Configure Firebase integration for improved performance
 
-== Configuration ==
+## Configuration
 
-= AI Provider Settings =
+### AI Provider Settings
 1. Select your preferred AI provider (OpenAI, DeepSeek, or Gemini)
 2. Enter the API key for your chosen provider
 3. Select the specific model you want to use
 4. Configure provider-specific settings if available
 
-= Advanced Settings =
+### Advanced Settings
 * Suggestion Threshold: Set minimum relevance score (0.1-1.0)
 * Maximum Links: Set maximum suggestions per post (1-20)
 * Excluded Post Types: Choose which post types to exclude
 
-= Firebase Integration =
+### Firebase Integration
 * Enter Firebase credentials for improved performance
 * Test connection
 * Sync existing posts for faster suggestions
 
-== Frequently Asked Questions ==
+## Frequently Asked Questions
 
 = Which AI provider should I choose? =
 
@@ -136,7 +141,7 @@ WP Smart Linker enhances your WordPress site's SEO and user experience by automa
 * Active API key for chosen provider
 * Optional: Firebase account for enhanced performance
 
-== Changelog ==
+## Changelog
 
 = 1.1.0 =
 * Added support for multiple AI providers (DeepSeek and Gemini)
