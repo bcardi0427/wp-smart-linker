@@ -5,6 +5,11 @@ class OpenAI_Integration extends AI_Integration_Base {
     private $api_endpoint = 'https://api.openai.com/v1/chat/completions';
     private $models_endpoint = 'https://api.openai.com/v1/models';
     private $valid_models = null;
+    private $default_models = [
+        'gpt-3.5-turbo' => true,
+        'gpt-4' => true,
+        'gpt-4-turbo' => true
+    ];
 
     /**
      * Set up API credentials from settings
@@ -39,18 +44,15 @@ class OpenAI_Integration extends AI_Integration_Base {
 
         // Early return with default models if no API key is set
         if (empty($this->api_key)) {
-            return [
-                'gpt-3.5-turbo' => true,
-                'gpt-4' => true,
-                'gpt-4-turbo' => true
-            ];
+            $this->valid_models = $this->default_models;
+            return $this->valid_models;
         }
 
         try {
-            $response = wp_remote_post($this->models_endpoint, [
+            error_log('WSL Debug - Fetching OpenAI models');
+            $response = wp_remote_get($this->models_endpoint, [
                 'headers' => [
-                    'Authorization' => 'Bearer ' . $this->api_key,
-                    'Content-Type' => 'application/json'
+                    'Authorization' => 'Bearer ' . $this->api_key
                 ],
                 'timeout' => 30
             ]);
@@ -80,32 +82,34 @@ class OpenAI_Integration extends AI_Integration_Base {
                 );
             }
 
-            // Filter models based on availability and type
-            $this->valid_models = [];
+            $models = [];
             foreach ($data['data'] as $model) {
                 if (isset($model['id'])) {
-                    $id = $model['id'];
-                    // Include GPT models and their variants
-                    if (strpos($id, 'gpt') !== false || 
-                        strpos($id, 'ft:gpt') !== false || 
-                        strpos($id, 'text-davinci') !== false) {
-                        $this->valid_models[$id] = true;
-                    }
+                    $models[] = $model['id'];
+                    error_log('WSL Debug - Found model: ' . $model['id']);
                 }
             }
 
-            // Cache the models list for 24 hours
+            error_log('WSL Debug - Total models found: ' . count($models));
+
+            // Output select HTML directly
+            ob_start();
+            echo '<select name="openai_models">';
+            foreach ($models as $model) {
+                echo '<option value="' . esc_attr($model) . '">' . esc_html($model) . '</option>';
+            }
+            echo '</select>';
+            $output = ob_get_clean();
+
+            $this->valid_models = array_fill_keys($models, true);
             set_transient('wsl_openai_models', $this->valid_models, DAY_IN_SECONDS);
 
-            return $this->valid_models;
+            error_log('WSL Debug - Generated select HTML: ' . $output);
+            return $output;
 
-        } catch (Exception $e) {
+        } catch (\Exception $e) {
             error_log('WSL Error fetching models: ' . $e->getMessage());
-            return [
-                'gpt-3.5-turbo' => true,
-                'gpt-4' => true,
-                'gpt-4-turbo' => true
-            ];
+            return $this->default_models;
         }
     }
 
@@ -140,10 +144,12 @@ class OpenAI_Integration extends AI_Integration_Base {
         // Try to get cached models first
         $cached_models = get_transient('wsl_openai_models');
         if ($cached_models !== false) {
+            error_log('WSL Debug - Using cached models: ' . print_r($cached_models, true));
             $models = array_keys($cached_models);
         } else {
             // Fetch fresh list if no cache
             $models = array_keys($this->fetch_valid_models());
+            error_log('WSL Debug - Using freshly fetched models: ' . print_r($models, true));
         }
 
         // Create display names for models
@@ -151,18 +157,12 @@ class OpenAI_Integration extends AI_Integration_Base {
         foreach ($models as $model_id) {
             // Clean up the model ID for display
             $display_name = ucwords(str_replace(['-', '.'], [' ', ' '], $model_id));
-            
-            // Special cases for better readability
-            if (strpos($model_id, 'ft:') === 0) {
-                $display_name = 'Fine-tuned: ' . substr($display_name, 3);
-            }
-            
             $formatted_models[$model_id] = $display_name;
         }
 
         // Sort models by display name
         asort($formatted_models);
-
+        error_log('WSL Debug - Final formatted models: ' . print_r($formatted_models, true));
         return $formatted_models;
     }
 
