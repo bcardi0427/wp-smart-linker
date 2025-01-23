@@ -131,7 +131,7 @@ WP Smart Linker enhances your WordPress site's SEO and user experience by automa
 = How do I get API keys? =
 
 * OpenAI: Visit https://platform.openai.com/api-keys
-* DeepSeek: Visit DeepSeek's developer portal
+* DeepSeek: Visit DeepSeek's developer portal: https://platform.deepseek.com/api_keys
 * Gemini: Visit https://makersuite.google.com/app/apikey
 
 = What are the system requirements? =
